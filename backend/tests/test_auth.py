@@ -206,3 +206,36 @@ def test_only_recipient_can_accept_a_quotation(client):
     quote = client.post(f"/api/v1/network/deal-rooms/{room['id']}/quotations", headers=host_headers, json={"title": "Monthly services", "currency": "ZAR", "line_items": [{"description": "Service", "quantity": 1, "unit_price": "1000.00"}]}).json()
     denied = client.post(f"/api/v1/network/quotations/{quote['id']}/decision", headers=host_headers, json={"decision": "accepted"})
     assert denied.status_code == 403
+
+
+def test_deal_room_file_upload_requires_clean_scan_and_is_private(client, monkeypatch):
+    import app.api.routes.deal_files as file_routes
+    host_headers = auth_headers(client)
+    recipient = register_second_business(client)
+    recipient_headers = {"Authorization": f"Bearer {recipient['access_token']}"}
+    client.patch("/api/v1/auth/business/profile", headers=recipient_headers, json={"directory_listed": True})
+    invite = client.post("/api/v1/network/invitations", headers=host_headers, json={"invited_business_id": recipient["business"]["id"], "access_password": "Separate-Secret-42"}).json()
+    conversation = client.post(f"/api/v1/network/invitations/{invite['id']}/accept", headers=recipient_headers, json={"access_password": "Separate-Secret-42"}).json()
+    room = client.post(f"/api/v1/network/conversations/{conversation['id']}/deal-room", headers=host_headers).json()
+    monkeypatch.setattr(file_routes, "presigned_upload", lambda key, content_type: "https://private-upload.example/signed")
+    monkeypatch.setattr(file_routes, "object_head", lambda key: {"ContentLength": 12, "ContentType": "application/pdf"})
+    monkeypatch.setattr(file_routes, "scan_object_with_clamav", lambda key: None)
+    monkeypatch.setattr(file_routes, "promote_clean_object", lambda source, destination: None)
+    monkeypatch.setattr(file_routes, "delete_object", lambda key: None)
+    monkeypatch.setattr(file_routes, "presigned_download", lambda key, filename, content_type: "https://private-download.example/signed")
+    upload = client.post(f"/api/v1/network/deal-rooms/{room['id']}/files/upload-url", headers=host_headers, json={"filename": "proposal.pdf", "content_type": "application/pdf", "size_bytes": 12})
+    assert upload.status_code == 201
+    file_id = upload.json()["file_id"]
+    pending = client.get(f"/api/v1/network/deal-rooms/{room['id']}/files", headers=recipient_headers)
+    assert pending.status_code == 200 and pending.json() == []
+    completed = client.post(f"/api/v1/network/files/{file_id}/complete", headers=host_headers)
+    assert completed.status_code == 200 and completed.json()["status"] == "clean"
+    visible = client.get(f"/api/v1/network/deal-rooms/{room['id']}/files", headers=recipient_headers)
+    assert visible.status_code == 200 and visible.json()[0]["original_filename"] == "proposal.pdf"
+    download = client.post(f"/api/v1/network/files/{file_id}/download-url", headers=recipient_headers)
+    assert download.status_code == 200 and "private-download.example" in download.json()["download_url"]
+
+def test_deal_room_file_rejects_disallowed_type(client):
+    headers = auth_headers(client)
+    response = client.post("/api/v1/network/deal-rooms/not-a-room/files/upload-url", headers=headers, json={"filename": "malware.exe", "content_type": "application/octet-stream", "size_bytes": 100})
+    assert response.status_code == 404
