@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import Business, Membership, User
-from app.schemas import AuthResponse, LoginRequest, RegisterRequest, UserResponse
+from app.schemas import AuthResponse, BusinessProfileUpdate, BusinessResponse, LoginRequest, RegisterRequest, UserResponse
 from app.security import create_access_token, decode_access_token, hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -63,3 +63,35 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
 @router.get("/me", response_model=UserResponse)
 def me(current_user: User = Depends(get_current_user)) -> UserResponse:
     return UserResponse.model_validate(current_user)
+
+
+@router.get("/business/profile", response_model=BusinessResponse)
+def get_business_profile(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> BusinessResponse:
+    membership = db.scalar(select(Membership).where(Membership.user_id == current_user.id).order_by(Membership.created_at))
+    if not membership:
+        raise HTTPException(status_code=404, detail="Business workspace not found.")
+    business = db.get(Business, membership.business_id)
+    if not business:
+        raise HTTPException(status_code=404, detail="Business workspace not found.")
+    return BusinessResponse.model_validate(business)
+
+@router.patch("/business/profile", response_model=BusinessResponse)
+def update_business_profile(payload: BusinessProfileUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> BusinessResponse:
+    membership = db.scalar(select(Membership).where(Membership.user_id == current_user.id).order_by(Membership.created_at))
+    if not membership:
+        raise HTTPException(status_code=404, detail="Business workspace not found.")
+    if membership.role not in {"owner", "admin"}:
+        raise HTTPException(status_code=403, detail="Only business owners or administrators can edit this profile.")
+    business = db.get(Business, membership.business_id)
+    if not business:
+        raise HTTPException(status_code=404, detail="Business workspace not found.")
+    changes = payload.model_dump(exclude_unset=True)
+    if changes.get("country") is not None:
+        changes["country"] = changes["country"].upper()
+    if changes.get("contact_email") is not None:
+        changes["contact_email"] = str(changes["contact_email"]).lower()
+    for field, value in changes.items():
+        setattr(business, field, value)
+    db.commit()
+    db.refresh(business)
+    return BusinessResponse.model_validate(business)
