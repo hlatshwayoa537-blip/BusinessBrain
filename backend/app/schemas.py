@@ -46,6 +46,11 @@ class BusinessProfileUpdate(BaseModel):
     province: str | None = Field(default=None, max_length=120)
     postal_code: str | None = Field(default=None, max_length=24)
     description: str | None = Field(default=None, max_length=2000)
+    directory_listed: bool | None = None
+    public_email: bool | None = None
+    public_phone: bool | None = None
+    public_website: bool | None = None
+    public_location: bool | None = None
     profile_image_data_url: str | None = Field(default=None, max_length=2_800_000)
 
     @field_validator("website")
@@ -87,3 +92,17 @@ class AuthResponse(BaseModel):
     token_type: str = "bearer"
     user: UserResponse
     business: BusinessResponse
+
+
+class PublicBusinessResponse(BaseModel):
+    id: str
+    name: str
+    industry: str
+    country: str
+    profile_image_data_url: str | None = None
+    website: str | None = None
+    contact_email: str | None = None
+    phone: str | None = None
+    city: str | None = None
+    province: str | None = None
+    description: str | None = None
