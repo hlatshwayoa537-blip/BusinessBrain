@@ -126,6 +126,6 @@ Set these backend environment variables before enabling uploads:
 - `CLAMAV_HOST`, `CLAMAV_PORT` and optionally `CLAMAV_TIMEOUT_SECONDS` for a reachable ClamAV daemon.
 - Optionally tune `S3_UPLOAD_URL_EXPIRE_SECONDS` and `S3_DOWNLOAD_URL_EXPIRE_SECONDS`.
 
-The bucket must remain private, have public access blocked, and have lifecycle cleanup configured for abandoned `quarantine/` objects. Configure bucket CORS to allow the exact frontend origins and browser `PUT` requests with the `Content-Type` header. Do not expose bucket credentials to the frontend. Deploy and monitor ClamAV separately; if it is unavailable, BusinessBrain deliberately refuses to release files.
+The bucket must remain private, have public access blocked, and have lifecycle cleanup configured for abandoned `quarantine/` objects. Configure bucket CORS to allow the exact frontend origins and browser `POST` requests with the `Content-Type` form field. Do not expose bucket credentials to the frontend. Deploy and monitor ClamAV separately; if it is unavailable, BusinessBrain deliberately refuses to release files.
 
 Migration `0007_deal_room_files` follows migration 0006. Apply `alembic upgrade head` before use. Storage and ClamAV credentials are not configured by this code change; document upload remains unavailable until the deployment environment and private bucket CORS are configured.
