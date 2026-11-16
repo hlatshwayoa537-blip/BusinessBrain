@@ -67,3 +67,42 @@ def test_registration_requires_strong_password(client):
     payload["password"] = "short"
     response = client.post("/api/v1/auth/register", json=payload)
     assert response.status_code == 422
+
+
+def test_business_network_directory_is_opt_in_and_respects_contact_privacy(client):
+    owner_headers = auth_headers(client)
+    update = client.patch("/api/v1/auth/business/profile", headers=owner_headers, json={
+        "directory_listed": True,
+        "contact_email": "public@example.co.za",
+        "phone": "+27111222333",
+        "website": "https://example.co.za",
+        "city": "Durban",
+        "province": "KwaZulu-Natal",
+        "description": "Independent retail supplier.",
+        "public_email": True,
+        "public_phone": False,
+        "public_website": True,
+        "public_location": False,
+    })
+    assert update.status_code == 200
+    assert update.json()["directory_listed"] is True
+    results = client.get("/api/v1/network/businesses", headers=owner_headers)
+    assert results.status_code == 200
+    assert len(results.json()) == 1
+    listed = results.json()[0]
+    assert listed["contact_email"] == "public@example.co.za"
+    assert listed["phone"] is None
+    assert listed["website"] == "https://example.co.za"
+    assert listed["city"] is None
+    assert listed["province"] is None
+    assert "registration_number" not in listed
+
+def test_business_network_directory_excludes_unlisted_businesses(client):
+    headers = auth_headers(client)
+    response = client.get("/api/v1/network/businesses", headers=headers)
+    assert response.status_code == 200
+    assert response.json() == []
+
+def test_business_network_directory_requires_authentication(client):
+    response = client.get("/api/v1/network/businesses")
+    assert response.status_code == 401
