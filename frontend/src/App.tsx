@@ -370,7 +370,49 @@ export default function App() {
           {business.description && <p className="directory-description">{business.description}</p>}
           {(business.city || business.province) && <p className="directory-meta">{[business.city,business.province].filter(Boolean).join(", ")}</p>}
           <div className="directory-contacts">{business.contact_email && <a href={"mailto:"+business.contact_email}>Email business</a>}{business.phone && <a href={"tel:"+business.phone}>Call business</a>}{business.website && <a href={business.website} target="_blank" rel="noreferrer">Website</a>}</div>
+          <button className="network-invite-button" type="button" onClick={()=>{setInviteTarget(business);setNetworkActionMessage("");}}>Invite to private conversation</button>
         </article>)}</div>
+      </section>
+      {inviteTarget && <section className="network-panel invite-panel">
+        <div className="profile-centre-heading"><div><div className="eyebrow">PRIVATE INVITATION</div><h2>Invite {inviteTarget.name}</h2><p>Create a password for the private conversation. Share it separately with your contact, not in this invitation.</p></div><button className="network-close" type="button" onClick={()=>setInviteTarget(null)}>Cancel</button></div>
+        <form className="network-invite-form" onSubmit={sendBusinessInvitation}>
+          <label>Conversation password<input required minLength={8} maxLength={128} type="password" value={invitePassword} onChange={e=>setInvitePassword(e.target.value)} placeholder="At least 8 characters"/></label>
+          <label>Invitation message (optional)<textarea rows={3} maxLength={1000} value={inviteMessage} onChange={e=>setInviteMessage(e.target.value)} placeholder="Tell the business why you would like to connect."/></label>
+          <button className="auth-submit" type="submit" disabled={networkActionBusy}>{networkActionBusy ? "Sending invitation…" : "Send private invitation"} <ArrowUpRight size={16}/></button>
+        </form>
+      </section>}
+      <section className="network-panel" id="private-conversations">
+        <div className="profile-centre-heading"><div><div className="eyebrow">SECURE BUSINESS COMMUNICATION</div><h2>Private conversations & Deal Rooms</h2><p>Invite another business, agree on a separate password, discuss privately and move into a Deal Room when you are ready.</p></div><span className="profile-status">Invite-only</span></div>
+        {networkActionMessage && <p className="directory-message" role="status">{networkActionMessage}</p>}
+        <div className="network-workspace-grid">
+          <div className="network-list-column">
+            <div className="network-subheading"><h3>Invitations</h3><span>{incomingInvitations.filter(item=>item.status==="pending").length} pending</span></div>
+            {incomingInvitations.filter(item=>item.status==="pending").length===0 && <p className="network-empty">No pending invitations.</p>}
+            {incomingInvitations.filter(item=>item.status==="pending").map(invite=><article className="invitation-card" key={invite.id}>
+              <strong>{invite.host_business_name}</strong><p>{invite.invitation_message || "This business has invited you to a private conversation."}</p>
+              <label>Conversation password<input type="password" minLength={8} value={acceptPassword} onChange={e=>setAcceptPassword(e.target.value)} placeholder="Enter password shared separately"/></label>
+              <div className="invitation-actions"><button type="button" className="network-primary-button" disabled={networkActionBusy || acceptPassword.length<8} onClick={()=>acceptBusinessInvitation(invite.id)}>Accept</button><button type="button" className="network-secondary-button" disabled={networkActionBusy} onClick={()=>rejectBusinessInvitation(invite.id)}>Reject</button></div>
+            </article>)}
+            <div className="network-subheading conversation-list-heading"><h3>Conversations</h3><button type="button" onClick={()=>void refreshNetwork()}>Refresh</button></div>
+            {conversations.length===0 && <p className="network-empty">Accepted private conversations will appear here.</p>}
+            {conversations.map(chat=><button type="button" className={"conversation-select "+(selectedConversation?.id===chat.id?"selected":"")} key={chat.id} onClick={()=>setSelectedConversation(chat)}>
+              <strong>{chat.host_business_id===session.business.id?chat.invited_business_name:chat.host_business_name}</strong>
+              <span>{chat.deal_room_id ? "Deal Room · "+(chat.deal_room_status || "discussion").replaceAll("_"," ") : "Private conversation"}</span>
+            </button>)}
+          </div>
+          <div className="network-chat-column">
+            {!selectedConversation ? <div className="network-empty-state"><LockKeyhole size={30}/><strong>Your private workspace</strong><p>Select an accepted conversation to start messaging. Either business can open the Deal Room.</p></div> : <>
+              <div className="chat-heading"><div><strong>{selectedConversation.host_business_id===session.business.id?selectedConversation.invited_business_name:selectedConversation.host_business_name}</strong><span>Private business conversation</span></div>{!selectedConversation.deal_room_id && <button type="button" className="network-primary-button" onClick={openDealRoom}>Open Deal Room</button>}</div>
+              <div className="message-list">{conversationMessages.map(message=><article className={"message-bubble "+(message.sender_business_id===session.business.id?"own":"")} key={message.id}><strong>{message.sender_business_name} · {message.sender_user_name}</strong><p>{message.body}</p><time>{new Date(message.created_at).toLocaleString()}</time></article>)}{conversationMessages.length===0 && <p className="network-empty">No messages yet. Start the conversation.</p>}</div>
+              <form className="message-compose" onSubmit={sendConversationMessage}><input value={conversationDraft} onChange={e=>setConversationDraft(e.target.value)} maxLength={5000} placeholder="Write a private message…" required/><button type="submit" disabled={!conversationDraft.trim()}>Send</button></form>
+              {dealRoom && <div className="deal-room-panel">
+                <div className="chat-heading"><div><strong>Deal Room</strong><span>Private negotiation space</span></div><select aria-label="Deal status" value={dealRoom.status} onChange={e=>updateDealStatus(e.target.value)}><option value="discussion">Discussion</option><option value="negotiation">Negotiation</option><option value="proposal_submitted">Proposal submitted</option><option value="agreement_reached">Agreement reached</option><option value="deal_completed">Deal completed</option><option value="deal_cancelled">Deal cancelled</option></select></div>
+                <div className="message-list deal-messages">{dealRoomMessages.map(message=><article className={"message-bubble "+(message.sender_business_id===session.business.id?"own":"")} key={message.id}><strong>{message.sender_business_name}</strong><p>{message.body}</p><time>{new Date(message.created_at).toLocaleString()}</time></article>)}{dealRoomMessages.length===0 && <p className="network-empty">Use this room for proposals, commercial terms and closing discussions.</p>}</div>
+                <form className="message-compose" onSubmit={sendDealRoomMessage}><input value={dealDraft} onChange={e=>setDealDraft(e.target.value)} maxLength={5000} placeholder="Write a Deal Room message…" required/><button type="submit" disabled={!dealDraft.trim()}>Send</button></form>
+              </div>}
+            </>}
+          </div>
+        </div>
       </section>
       <section className="stats-grid" aria-label="Workspace summary"><div className="stat-card"><span className="stat-icon">{session.business.profile_image_data_url ? <img src={session.business.profile_image_data_url} alt="Business profile"/> : <Building2 size={18}/>}</span><span className="stat-label">Business profile</span><strong>Created</strong><small>{session.business.country} · {session.business.industry}</small></div><div className="stat-card"><span className="stat-icon"><Users size={18}/></span><span className="stat-label">Your role</span><strong>Owner</strong><small>Workspace administrator</small></div><div className="stat-card"><span className="stat-icon"><CreditCard size={18}/></span><span className="stat-label">Financial overview</span><strong>Not connected</strong><small>Add records as you get started</small></div><div className="stat-card"><span className="stat-icon"><Activity size={18}/></span><span className="stat-label">System status</span><strong>{apiStatus === "online" ? "Connected" : "Offline"}</strong><small>Backend health check</small></div></section>
       <section className="modules-section"><div className="section-heading"><div><div className="eyebrow">THE BUSINESS OPERATING SYSTEM</div><h2>Your business, connected.</h2><p>One workspace for the work that moves your business forward.</p></div><span className="module-count">06 CORE MODULES</span></div><div className="module-grid">{modules.map(({icon: Icon,title,detail,tag}) => <article className="module-card" key={title}><div className="module-icon"><Icon size={20}/></div><span className="module-tag">{tag}</span><h3>{title}</h3><p>{detail}</p><span className="module-footer">Part of BusinessBrain <ArrowUpRight size={14}/></span></article>)}</div></section>
