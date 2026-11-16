@@ -100,3 +100,25 @@ class DealRoomMessage(Base):
     sender_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class DealRoomQuotation(Base):
+    __tablename__ = "deal_room_quotations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    deal_room_id: Mapped[str] = mapped_column(ForeignKey("business_deal_rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    issuer_business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    issuer_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    reference: Mapped[str] = mapped_column(String(40), nullable=False, unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(180), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    line_items_json: Mapped[str] = mapped_column(Text, nullable=False)
+    subtotal: Mapped[float] = mapped_column(__import__("sqlalchemy").Numeric(14, 2), nullable=False)
+    tax_total: Mapped[float] = mapped_column(__import__("sqlalchemy").Numeric(14, 2), nullable=False)
+    total: Mapped[float] = mapped_column(__import__("sqlalchemy").Numeric(14, 2), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="sent", index=True)
+    response_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    response_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
