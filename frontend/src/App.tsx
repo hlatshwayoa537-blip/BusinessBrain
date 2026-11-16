@@ -485,7 +485,9 @@ export default function App() {
     setMode("login");
   }
 
-  if (window.location.pathname === "/careers" || window.location.pathname === "/jobs") return <PublicCareers />;\n\n  if (!session) return <div className="auth-page">
+  if (window.location.pathname === "/careers" || window.location.pathname === "/jobs") return <PublicCareers />;
+
+  if (!session) return <div className="auth-page">
     <div className="auth-brand"><div className="brand-mark"><Activity size={22}/></div><span>Business<span className="brand-accent">Brain</span></span></div>
     <div className="auth-layout">
       <section className="auth-intro">
