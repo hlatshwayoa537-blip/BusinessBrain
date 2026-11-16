@@ -85,6 +85,15 @@ export default function App() {
       if (!response.ok) throw new Error(data.detail || "We couldn't complete your request. Please try again.");
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
       setSession(data as AuthData);
+      setProfileDraft({
+        name: data.business.name, industry: data.business.industry, country: data.business.country,
+        registration_number: data.business.registration_number ?? "", website: data.business.website ?? "",
+        contact_email: data.business.contact_email ?? "", phone: data.business.phone ?? "",
+        address_line: data.business.address_line ?? "", city: data.business.city ?? "",
+        province: data.business.province ?? "", postal_code: data.business.postal_code ?? "",
+        description: data.business.description ?? "", profile_image_data_url: data.business.profile_image_data_url ?? null,
+      });
+      setProfileImage(data.business.profile_image_data_url ?? null);
       setPassword("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to connect. Please try again.");
