@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
 
@@ -23,6 +23,7 @@ class Business(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     industry: Mapped[str] = mapped_column(String(120), nullable=False)
     country: Mapped[str] = mapped_column(String(2), nullable=False, default="ZA")
+    profile_image_data_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     memberships: Mapped[list["Membership"]] = relationship(back_populates="business")
 
