@@ -68,7 +68,7 @@ def _file_response(db: Session, item: DealRoomFile) -> FileResponse:
 def create_upload_url(room_id: str, payload: UploadRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     business = _business(db, current_user)
     room = _room(db, room_id, business.id)
-    filename = Path(payload.filename.replace("\\", "/")).name
+    filename = re.sub(r"[^A-Za-z0-9._ -]", "_", Path(payload.filename.replace("\\", "/")).name).strip(" .")
     extension = Path(filename).suffix.lower()
     if not filename or filename in {".", ".."} or extension not in ALLOWED_TYPES or payload.content_type not in ALLOWED_TYPES[extension]:
         raise HTTPException(status_code=415, detail="File type is not supported. Upload PDF, DOCX, XLSX, PPTX, TXT, CSV, PNG or JPG files.")
@@ -87,6 +87,8 @@ def complete_upload(file_id: str, current_user: User = Depends(get_current_user)
     if not item:
         raise HTTPException(status_code=404, detail="File not found.")
     _room(db, item.deal_room_id, business.id)
+    if item.uploader_business_id != business.id:
+        raise HTTPException(status_code=403, detail="Only the uploading business can complete this upload.")
     if item.status == "clean":
         return _file_response(db, item)
     if item.status != "pending":
