@@ -172,3 +172,37 @@ def test_business_cannot_read_another_business_conversation(client):
     outsider_headers = {"Authorization":f"Bearer {outsider_auth['access_token']}"}
     response = client.get(f"/api/v1/network/conversations/{conversation['id']}/messages", headers=outsider_headers)
     assert response.status_code == 404
+
+
+def test_deal_room_quotation_is_shared_and_recipient_can_decide(client):
+    host_headers = auth_headers(client)
+    recipient = register_second_business(client)
+    recipient_headers = {"Authorization": f"Bearer {recipient['access_token']}"}
+    client.patch("/api/v1/auth/business/profile", headers=recipient_headers, json={"directory_listed": True})
+    invite = client.post("/api/v1/network/invitations", headers=host_headers, json={"invited_business_id": recipient["business"]["id"], "access_password": "Separate-Secret-42"}).json()
+    conversation = client.post(f"/api/v1/network/invitations/{invite['id']}/accept", headers=recipient_headers, json={"access_password": "Separate-Secret-42"}).json()
+    room = client.post(f"/api/v1/network/conversations/{conversation['id']}/deal-room", headers=host_headers).json()
+    quote = client.post(f"/api/v1/network/deal-rooms/{room['id']}/quotations", headers=host_headers, json={
+        "title": "Supply of office equipment", "currency": "ZAR",
+        "line_items": [{"description": "Laptop", "quantity": "2", "unit_price": "12500.00", "tax_rate": "15"}, {"description": "Delivery", "quantity": "1", "unit_price": "500.00", "tax_rate": "0"}],
+        "notes": "Subject to final written agreement."
+    })
+    assert quote.status_code == 201
+    body = quote.json()
+    assert body["subtotal"] == "25500.00" and body["tax_total"] == "3750.00" and body["total"] == "29250.00"
+    received = client.get(f"/api/v1/network/deal-rooms/{room['id']}/quotations", headers=recipient_headers)
+    assert received.status_code == 200 and received.json()[0]["id"] == body["id"]
+    accepted = client.post(f"/api/v1/network/quotations/{body['id']}/decision", headers=recipient_headers, json={"decision": "accepted", "note": "Approved for contract drafting."})
+    assert accepted.status_code == 200 and accepted.json()["status"] == "accepted"
+
+def test_only_recipient_can_accept_a_quotation(client):
+    host_headers = auth_headers(client)
+    recipient = register_second_business(client)
+    recipient_headers = {"Authorization": f"Bearer {recipient['access_token']}"}
+    client.patch("/api/v1/auth/business/profile", headers=recipient_headers, json={"directory_listed": True})
+    invite = client.post("/api/v1/network/invitations", headers=host_headers, json={"invited_business_id": recipient["business"]["id"], "access_password": "Separate-Secret-42"}).json()
+    conversation = client.post(f"/api/v1/network/invitations/{invite['id']}/accept", headers=recipient_headers, json={"access_password": "Separate-Secret-42"}).json()
+    room = client.post(f"/api/v1/network/conversations/{conversation['id']}/deal-room", headers=host_headers).json()
+    quote = client.post(f"/api/v1/network/deal-rooms/{room['id']}/quotations", headers=host_headers, json={"title": "Monthly services", "currency": "ZAR", "line_items": [{"description": "Service", "quantity": 1, "unit_price": "1000.00"}]}).json()
+    denied = client.post(f"/api/v1/network/quotations/{quote['id']}/decision", headers=host_headers, json={"decision": "accepted"})
+    assert denied.status_code == 403
