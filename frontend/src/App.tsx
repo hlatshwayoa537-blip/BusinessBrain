@@ -31,6 +31,79 @@ function readSession(): AuthData | null {
   } catch { return null; }
 }
 
+
+type PublicJob = { id: string; title: string; department?: string | null; location?: string | null; employment_type: string; description: string; requirements?: string | null; created_at: string; business_name: string; business_industry: string; business_country: string };
+
+function PublicCareers() {
+  const [jobs, setJobs] = useState<PublicJob[]>([]);
+  const [query, setQuery] = useState("");
+  const [selectedJob, setSelectedJob] = useState<PublicJob | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [form, setForm] = useState({applicant_name:"",email:"",phone:"",location:"",experience:"",resume_url:"",cover_letter:"",consent_to_share:false,website:""});
+
+  async function loadJobs(search = "") {
+    setLoading(true); setError("");
+    try {
+      const params = new URLSearchParams();
+      if (search.trim()) params.set("q", search.trim());
+      const response = await fetch(API_BASE + "/recruitment/public/jobs?" + params.toString());
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Unable to load vacancies.");
+      setJobs(data as PublicJob[]);
+    } catch (err) { setError(err instanceof Error ? err.message : "Unable to load vacancies."); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { void loadJobs(); }, []);
+
+  async function submitApplication(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedJob) return;
+    setSubmitting(true); setMessage(""); setError("");
+    try {
+      const response = await fetch(API_BASE + "/recruitment/public/jobs/" + selectedJob.id + "/applications", {
+        method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(form)
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Your application could not be submitted.");
+      setMessage(data.message || "Your application has been submitted.");
+      setForm({applicant_name:"",email:"",phone:"",location:"",experience:"",resume_url:"",cover_letter:"",consent_to_share:false,website:""});
+      setSelectedJob(null);
+    } catch (err) { setError(err instanceof Error ? err.message : "Your application could not be submitted."); }
+    finally { setSubmitting(false); }
+  }
+
+  return <div className="careers-page">
+    <header className="careers-top"><a className="brand" href="/"><div className="brand-mark"><Activity size={22}/></div><span>Business<span className="brand-accent">Brain</span></span></a><a className="careers-signin" href="/">Business sign in <ArrowUpRight size={15}/></a></header>
+    <main className="careers-main">
+      <section className="careers-hero"><div className="eyebrow">BUSINESSBRAIN CAREERS</div><h1>Find your next<br/><span>opportunity.</span></h1><p>Explore roles published by businesses on BusinessBrain. Apply directly without creating a company account.</p><div className="careers-count">{jobs.length} {jobs.length === 1 ? "opportunity" : "opportunities"} currently listed</div></section>
+      {message && <div className="careers-alert success" role="status">{message}</div>}
+      <form className="careers-search" onSubmit={event=>{event.preventDefault();void loadJobs(query);}}><input aria-label="Search vacancies" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search job title, company, department or location"/><button className="auth-submit" type="submit">Search roles <ArrowUpRight size={16}/></button></form>
+      {error && <div className="careers-alert" role="alert">{error}</div>}
+      {loading ? <p className="careers-empty">Loading published opportunities…</p> : jobs.length === 0 ? <p className="careers-empty">No published vacancies found. Check back soon.</p> : <div className="careers-grid">{jobs.map(job=><article className="careers-job" key={job.id}><div className="careers-job-top"><span className="careers-job-type">{job.employment_type.replaceAll("_"," ")}</span><span className="careers-job-country">{job.business_country}</span></div><h2>{job.title}</h2><strong>{job.business_name}</strong><p className="careers-job-meta">{[job.department,job.location].filter(Boolean).join(" · ") || job.business_industry}</p><p className="careers-job-description">{job.description}</p>{job.requirements && <details><summary>View requirements</summary><p>{job.requirements}</p></details>}<button className="careers-apply" type="button" onClick={()=>{setSelectedJob(job);setMessage("");setError("");window.scrollTo({top:0,behavior:"smooth"});}}>Apply for this role <ArrowUpRight size={15}/></button></article>)}</div>}
+      {selectedJob && <section className="careers-application" id="apply"><div className="careers-application-head"><div><div className="eyebrow">CANDIDATE APPLICATION</div><h2>{selectedJob.title}</h2><p>{selectedJob.business_name} · {selectedJob.location || selectedJob.business_country}</p></div><button className="network-close" type="button" onClick={()=>setSelectedJob(null)}>Close</button></div>
+        <form className="careers-form" onSubmit={submitApplication}>
+          <label>Full name<input required minLength={2} maxLength={160} autoComplete="name" value={form.applicant_name} onChange={e=>setForm({...form,applicant_name:e.target.value})}/></label>
+          <label>Email address<input required type="email" maxLength={320} autoComplete="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label>
+          <label>Phone number (optional)<input type="tel" maxLength={40} value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/></label>
+          <label>Current location<input maxLength={180} value={form.location} onChange={e=>setForm({...form,location:e.target.value})} placeholder="City, province"/></label>
+          <label>Experience<input maxLength={80} value={form.experience} onChange={e=>setForm({...form,experience:e.target.value})} placeholder="e.g. 2 years, graduate, entry-level"/></label>
+          <label>CV link (optional)<input type="url" maxLength={500} value={form.resume_url} onChange={e=>setForm({...form,resume_url:e.target.value})} placeholder="https://…"/></label>
+          <label className="careers-wide">Cover letter / introduction<textarea rows={5} maxLength={5000} value={form.cover_letter} onChange={e=>setForm({...form,cover_letter:e.target.value})} placeholder="Tell the hiring team why you are interested in this role."/></label>
+          <label className="careers-honeypot" aria-hidden="true">Leave this field empty<input tabIndex={-1} autoComplete="off" value={form.website} onChange={e=>setForm({...form,website:e.target.value})}/></label>
+          <label className="careers-consent careers-wide"><input required type="checkbox" checked={form.consent_to_share} onChange={e=>setForm({...form,consent_to_share:e.target.checked})}/> I consent to BusinessBrain sharing the information in this application with the business advertising this vacancy for recruitment purposes.</label>
+          {error && <div className="careers-alert careers-wide" role="alert">{error}</div>}
+          <button className="auth-submit careers-wide" type="submit" disabled={submitting || !form.consent_to_share}>{submitting ? "Submitting application…" : "Submit application"} <ArrowUpRight size={16}/></button>
+          <p className="careers-privacy careers-wide">Only the hiring business can view your application inside its private recruitment workspace. Do not include sensitive personal information that is not relevant to this role.</p>
+        </form>
+      </section>}
+    </main>
+    <footer className="careers-footer">BusinessBrain © 2026 · Connecting people with opportunity.</footer>
+  </div>;
+}
+
 export default function App() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
   const [session, setSession] = useState<AuthData | null>(readSession);
@@ -412,7 +485,7 @@ export default function App() {
     setMode("login");
   }
 
-  if (!session) return <div className="auth-page">
+  if (window.location.pathname === "/careers" || window.location.pathname === "/jobs") return <PublicCareers />;\n\n  if (!session) return <div className="auth-page">
     <div className="auth-brand"><div className="brand-mark"><Activity size={22}/></div><span>Business<span className="brand-accent">Brain</span></span></div>
     <div className="auth-layout">
       <section className="auth-intro">
@@ -433,7 +506,7 @@ export default function App() {
           {apiStatus === "offline" && <div className="auth-warning">The BusinessBrain API is not reachable yet. Check that the backend is running and try again.</div>}
           <button className="auth-submit" type="submit" disabled={busy || apiStatus !== "online"}>{busy ? "Please wait…" : mode === "register" ? "Create business workspace" : "Sign in securely"} <ArrowUpRight size={17}/></button>
         </form>
-        <div className="auth-footnote"><LockKeyhole size={14}/> Your password is securely hashed. Never share it with anyone.</div>
+        <div className="auth-footnote"><LockKeyhole size={14}/> Your password is securely hashed. Never share it with anyone.</div><a className="careers-entry-link" href="/careers">Looking for work? Browse open vacancies <ArrowUpRight size={14}/></a>
       </section>
     </div>
     <footer className="auth-footer">BusinessBrain © 2026 <span>BUILD THE INTELLIGENCE THAT RUNS BUSINESSES.</span></footer>
