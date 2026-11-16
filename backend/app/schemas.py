@@ -86,6 +86,11 @@ class BusinessResponse(BaseModel):
     province: str | None = None
     postal_code: str | None = None
     description: str | None = None
+    directory_listed: bool = False
+    public_email: bool = False
+    public_phone: bool = False
+    public_website: bool = False
+    public_location: bool = False
 
 class AuthResponse(BaseModel):
     access_token: str
