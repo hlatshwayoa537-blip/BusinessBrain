@@ -217,7 +217,7 @@ def test_deal_room_file_upload_requires_clean_scan_and_is_private(client, monkey
     invite = client.post("/api/v1/network/invitations", headers=host_headers, json={"invited_business_id": recipient["business"]["id"], "access_password": "Separate-Secret-42"}).json()
     conversation = client.post(f"/api/v1/network/invitations/{invite['id']}/accept", headers=recipient_headers, json={"access_password": "Separate-Secret-42"}).json()
     room = client.post(f"/api/v1/network/conversations/{conversation['id']}/deal-room", headers=host_headers).json()
-    monkeypatch.setattr(file_routes, "presigned_upload", lambda key, content_type: "https://private-upload.example/signed")
+    monkeypatch.setattr(file_routes, "presigned_upload", lambda key, content_type, max_bytes: {"url": "https://private-upload.example/signed", "fields": {"key": key, "Content-Type": content_type}})
     monkeypatch.setattr(file_routes, "object_head", lambda key: {"ContentLength": 12, "ContentType": "application/pdf"})
     monkeypatch.setattr(file_routes, "scan_object_with_clamav", lambda key: None)
     monkeypatch.setattr(file_routes, "promote_clean_object", lambda source, destination: None)
@@ -236,6 +236,12 @@ def test_deal_room_file_upload_requires_clean_scan_and_is_private(client, monkey
     assert download.status_code == 200 and "private-download.example" in download.json()["download_url"]
 
 def test_deal_room_file_rejects_disallowed_type(client):
-    headers = auth_headers(client)
-    response = client.post("/api/v1/network/deal-rooms/not-a-room/files/upload-url", headers=headers, json={"filename": "malware.exe", "content_type": "application/octet-stream", "size_bytes": 100})
-    assert response.status_code == 404
+    host_headers = auth_headers(client)
+    recipient = register_second_business(client)
+    recipient_headers = {"Authorization": f"Bearer {recipient['access_token']}"}
+    client.patch("/api/v1/auth/business/profile", headers=recipient_headers, json={"directory_listed": True})
+    invite = client.post("/api/v1/network/invitations", headers=host_headers, json={"invited_business_id": recipient["business"]["id"], "access_password": "Separate-Secret-42"}).json()
+    conversation = client.post(f"/api/v1/network/invitations/{invite['id']}/accept", headers=recipient_headers, json={"access_password": "Separate-Secret-42"}).json()
+    room = client.post(f"/api/v1/network/conversations/{conversation['id']}/deal-room", headers=host_headers).json()
+    response = client.post(f"/api/v1/network/deal-rooms/{room['id']}/files/upload-url", headers=host_headers, json={"filename": "malware.exe", "content_type": "application/octet-stream", "size_bytes": 100})
+    assert response.status_code == 415
