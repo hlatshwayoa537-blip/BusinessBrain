@@ -74,11 +74,11 @@ def create_upload_url(room_id: str, payload: UploadRequest, current_user: User =
         raise HTTPException(status_code=415, detail="File type is not supported. Upload PDF, DOCX, XLSX, PPTX, TXT, CSV, PNG or JPG files.")
     file_id = str(uuid.uuid4())
     key = f"quarantine/deal-rooms/{room.id}/{file_id}"
-    url = presigned_upload(key, payload.content_type)
+    upload = presigned_upload(key, payload.content_type, MAX_FILE_BYTES)
     item = DealRoomFile(id=file_id, deal_room_id=room.id, uploader_business_id=business.id, uploader_user_id=current_user.id, original_filename=filename, content_type=payload.content_type, size_bytes=payload.size_bytes, storage_key=key, status="pending")
     db.add(item)
     db.commit()
-    return {"file_id": file_id, "upload_url": url, "method": "PUT", "headers": {"Content-Type": payload.content_type}, "expires_in": 300}
+    return {"file_id": file_id, "upload_url": upload["url"], "method": "POST", "fields": upload["fields"], "expires_in": 300}
 
 @router.post("/files/{file_id}/complete", response_model=FileResponse)
 def complete_upload(file_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
