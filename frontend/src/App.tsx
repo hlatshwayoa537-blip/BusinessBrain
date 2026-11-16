@@ -86,6 +86,39 @@ export default function App() {
   const [dealDraft, setDealDraft] = useState("");
   const [networkActionBusy, setNetworkActionBusy] = useState(false);
   const [networkActionMessage, setNetworkActionMessage] = useState("");
+  const [jobs, setJobs] = useState<any[]>([]);
+  const [applications, setApplications] = useState<any[]>([]);
+  const [jobTitle, setJobTitle] = useState("");
+  const [jobDepartment, setJobDepartment] = useState("");
+  const [jobLocation, setJobLocation] = useState("");
+  const [jobType, setJobType] = useState("full_time");
+  const [jobDescription, setJobDescription] = useState("");
+  const [jobRequirements, setJobRequirements] = useState("");
+  const [recruitmentBusy, setRecruitmentBusy] = useState(false);
+  const [recruitmentMessage, setRecruitmentMessage] = useState("");
+  const [applicantFilter, setApplicantFilter] = useState("all");
+
+
+
+  async function refreshRecruitment() {
+    if (!session) return;
+    try { const [jobData, applicantData] = await Promise.all([networkRequest("/recruitment/jobs"), networkRequest("/recruitment/applications")]); setJobs(jobData); setApplications(applicantData); }
+    catch (err) { setRecruitmentMessage(err instanceof Error ? err.message : "Could not load recruitment records."); }
+  }
+  useEffect(() => { if (session) void refreshRecruitment(); }, [session?.access_token]);
+  async function createJob(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setRecruitmentBusy(true); setRecruitmentMessage("");
+    try { await networkRequest("/recruitment/jobs", "POST", { title: jobTitle, department: jobDepartment || null, location: jobLocation || null, employment_type: jobType, description: jobDescription, requirements: jobRequirements || null, status: "published" }); setJobTitle(""); setJobDepartment(""); setJobLocation(""); setJobDescription(""); setJobRequirements(""); setRecruitmentMessage("Vacancy published to your recruitment workspace."); await refreshRecruitment(); }
+    catch (err) { setRecruitmentMessage(err instanceof Error ? err.message : "Vacancy could not be created."); } finally { setRecruitmentBusy(false); }
+  }
+  async function changeJobStatus(jobId: string, status: string) {
+    try { await networkRequest("/recruitment/jobs/" + jobId, "PATCH", { status }); await refreshRecruitment(); }
+    catch (err) { setRecruitmentMessage(err instanceof Error ? err.message : "Vacancy status could not be changed."); }
+  }
+  async function changeApplicantStatus(applicationId: string, status: string) {
+    try { await networkRequest("/recruitment/applications/" + applicationId, "PATCH", { status }); await refreshRecruitment(); }
+    catch (err) { setRecruitmentMessage(err instanceof Error ? err.message : "Applicant status could not be changed."); }
+  }
 
   function handleProfileImage(file?: File) {
     setImageError("");
@@ -447,6 +480,30 @@ export default function App() {
           </div>
           <div className="profile-form-footer">{profileMessage && <span className={profileMessage.includes("saved") ? "profile-success" : "profile-upload-error"} role="status">{profileMessage}</span>}<button className="auth-submit profile-save" type="submit" disabled={profileBusy}>{profileBusy ? "Saving profile…" : "Save business profile & privacy"} <ArrowUpRight size={16}/></button></div>
         </form>
+      </section>
+
+      <section className="recruitment-centre" id="people">
+        <div className="profile-centre-heading"><div><div className="eyebrow">PEOPLE & RECRUITMENT</div><h2>Find the people who move business forward.</h2><p>Publish vacancies, review applicants and manage each candidate through a clear hiring pipeline.</p></div><span className="profile-status">Private to your business</span></div>
+        {recruitmentMessage && <p className="recruitment-message" role="status">{recruitmentMessage}</p>}
+        <div className="recruitment-stats"><article><span>Open vacancies</span><strong>{jobs.filter(job=>job.status==="published").length}</strong></article><article><span>Total applicants</span><strong>{applications.length}</strong></article><article><span>Shortlisted</span><strong>{applications.filter(app=>app.status==="shortlisted" || app.status==="interview").length}</strong></article><article><span>New applications</span><strong>{applications.filter(app=>app.status==="new").length}</strong></article></div>
+        <div className="recruitment-layout">
+          <form className="job-create-card" onSubmit={createJob}><div className="recruitment-card-heading"><div><span className="eyebrow">NEW OPPORTUNITY</span><h3>Publish a vacancy</h3></div><span className="profile-status">Company hiring</span></div>
+            <label>Job title<input required minLength={3} maxLength={180} value={jobTitle} onChange={e=>setJobTitle(e.target.value)} placeholder="e.g. Sales Manager"/></label>
+            <div className="auth-two-col"><label>Department<input value={jobDepartment} onChange={e=>setJobDepartment(e.target.value)} placeholder="e.g. Sales"/></label><label>Location<input value={jobLocation} onChange={e=>setJobLocation(e.target.value)} placeholder="e.g. Durban / Hybrid"/></label></div>
+            <label>Employment type<select value={jobType} onChange={e=>setJobType(e.target.value)}><option value="full_time">Full time</option><option value="part_time">Part time</option><option value="contract">Contract</option><option value="internship">Internship</option><option value="temporary">Temporary</option></select></label>
+            <label>Job description<textarea required minLength={30} maxLength={12000} rows={5} value={jobDescription} onChange={e=>setJobDescription(e.target.value)} placeholder="Describe the role, responsibilities and what success looks like."/></label>
+            <label>Requirements (optional)<textarea maxLength={8000} rows={3} value={jobRequirements} onChange={e=>setJobRequirements(e.target.value)} placeholder="Skills, qualifications and experience."/></label>
+            <button className="auth-submit" type="submit" disabled={recruitmentBusy}>{recruitmentBusy ? "Publishing…" : "Publish vacancy"} <ArrowUpRight size={16}/></button>
+          </form>
+          <div className="recruitment-jobs"><div className="recruitment-card-heading"><div><span className="eyebrow">YOUR OPEN ROLES</span><h3>Vacancies</h3></div><span className="module-count">{jobs.length} TOTAL</span></div>
+            {jobs.length===0 && <p className="network-empty">No vacancies yet. Publish your first role to start building your hiring pipeline.</p>}
+            {jobs.map(job=><article className="job-card" key={job.id}><div className="job-card-top"><div><h4>{job.title}</h4><span>{job.department || "General"} · {job.location || "Location not specified"} · {job.employment_type.replace("_"," ")}</span></div><span className={"job-status "+job.status}>{job.status}</span></div><p>{job.description}</p><div className="job-card-footer"><span>{job.application_count} applicants</span><select aria-label={"Change status for "+job.title} value={job.status} onChange={e=>changeJobStatus(job.id,e.target.value)}><option value="draft">Draft</option><option value="published">Published</option><option value="closed">Closed</option></select></div></article>)}
+          </div>
+        </div>
+        <div className="applicants-panel"><div className="recruitment-card-heading"><div><span className="eyebrow">CANDIDATE PIPELINE</span><h3>Applicants</h3><p>Review candidate profiles and move each application to the next stage.</p></div><select aria-label="Filter applicants" value={applicantFilter} onChange={e=>setApplicantFilter(e.target.value)}><option value="all">All applicants</option><option value="new">New</option><option value="reviewing">Reviewing</option><option value="shortlisted">Shortlisted</option><option value="interview">Interview</option><option value="hired">Hired</option><option value="rejected">Rejected</option></select></div>
+          {applications.filter(app=>applicantFilter==="all" || app.status===applicantFilter).length===0 && <p className="network-empty">Applicant cards will appear here when people apply to your published vacancies.</p>}
+          <div className="applicant-grid">{applications.filter(app=>applicantFilter==="all" || app.status===applicantFilter).map(app=><article className="applicant-card" key={app.id}><div className="applicant-card-head"><div className="applicant-avatar">{app.applicant_name.split(" ").map((part:string)=>part[0]).slice(0,2).join("").toUpperCase()}</div><div className="applicant-identity"><h4>{app.applicant_name}</h4><span>{app.job_title}</span></div><span className={"applicant-status "+app.status}>{app.status}</span></div><div className="applicant-meta"><span>{app.location || "Location not supplied"}</span><span>{app.experience || "Experience not supplied"}</span><a href={"mailto:"+app.email}>{app.email}</a>{app.phone && <span>{app.phone}</span>}</div>{app.cover_letter && <p className="applicant-cover">{app.cover_letter}</p>}<div className="applicant-card-footer">{app.resume_url && <a href={app.resume_url} target="_blank" rel="noreferrer">View CV <ArrowUpRight size={13}/></a>}<select aria-label={"Update "+app.applicant_name+" application"} value={app.status} onChange={e=>changeApplicantStatus(app.id,e.target.value)}><option value="new">New</option><option value="reviewing">Reviewing</option><option value="shortlisted">Shortlisted</option><option value="interview">Interview</option><option value="rejected">Rejected</option><option value="hired">Hired</option></select></div></article>)}</div>
+        </div>
       </section>
       <section className="network-centre" id="network">
         <div className="profile-centre-heading"><div><div className="eyebrow">BUSINESS NETWORK</div><h2>Discover businesses</h2><p>Find companies that have chosen to make their profiles visible to the network.</p></div><span className="profile-status">Opt-in directory</span></div>
