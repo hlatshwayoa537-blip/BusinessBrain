@@ -11,7 +11,7 @@ type NetworkConversation = { id: string; host_business_id: string; host_business
 type NetworkMessage = { id: string; sender_business_id: string; sender_business_name: string; sender_user_name: string; body: string; created_at: string };
 type DealRoom = { id: string; conversation_id: string; status: string; created_at: string; updated_at: string };
 type Quotation = { id: string; deal_room_id: string; issuer_business_id: string; issuer_business_name: string; reference: string; title: string; currency: string; line_items: {description:string;quantity:string;unit_price:string;tax_rate:string;line_subtotal:string;line_tax:string;line_total:string}[]; subtotal: string; tax_total: string; total: string; notes?: string | null; valid_until?: string | null; status: string; response_note?: string | null; created_at: string };
-type QuoteLineDraft = { description: string; quantity: string; unit_price: string; tax_rate: string };
+type QuoteLineDraft = { description: string; quantity: string; unit_price: string; tax_rate: string };\ntype DealFile = { id: string; deal_room_id: string; uploader_business_id: string; uploader_business_name: string; original_filename: string; content_type: string; size_bytes: number; status: string; created_at: string };
 type AuthData = { access_token: string; user: { id: string; email: string; full_name: string }; business: BusinessProfile & { id: string } };
 const STORAGE_KEY = "businessbrain.session";
 const modules = [
@@ -67,7 +67,7 @@ export default function App() {
   const [conversationMessages, setConversationMessages] = useState<NetworkMessage[]>([]);
   const [dealRoomMessages, setDealRoomMessages] = useState<NetworkMessage[]>([]);
   const [dealRoom, setDealRoom] = useState<DealRoom | null>(null);
-  const [quotations, setQuotations] = useState<Quotation[]>([]);
+  const [quotations, setQuotations] = useState<Quotation[]>([]);\n  const [dealFiles, setDealFiles] = useState<DealFile[]>([]);\n  const [selectedDealFile, setSelectedDealFile] = useState<File | null>(null);\n  const [fileBusy, setFileBusy] = useState(false);\n  const [fileMessage, setFileMessage] = useState("");
   const [quoteTitle, setQuoteTitle] = useState("");
   const [quoteCurrency, setQuoteCurrency] = useState("ZAR");
   const [quoteValidUntil, setQuoteValidUntil] = useState("");
@@ -130,7 +130,7 @@ export default function App() {
   useEffect(() => { if (session) void refreshNetwork(); }, [session?.access_token]);
 
   useEffect(() => {
-    if (!session || !selectedConversation) { setConversationMessages([]); setDealRoomMessages([]); setDealRoom(null); return; }
+    if (!session || !selectedConversation) { setConversationMessages([]); setDealRoomMessages([]); setDealRoom(null); setDealFiles([]); return; }
     let cancelled = false;
     async function loadMessages() {
       try {
@@ -141,7 +141,7 @@ export default function App() {
           const dealMessages = await networkRequest("/network/deal-rooms/" + room.id + "/messages");
           const dealQuotes = await networkRequest("/network/deal-rooms/" + room.id + "/quotations");
           if (!cancelled) { setDealRoom(room); setDealRoomMessages(dealMessages as NetworkMessage[]); setQuotations(dealQuotes as Quotation[]); }
-        } else if (!cancelled) { setDealRoom(null); setDealRoomMessages([]); setQuotations([]); }
+        } else if (!cancelled) { setDealRoom(null); setDealRoomMessages([]); setQuotations([]); setDealFiles([]); }
       } catch (err) { if (!cancelled) setNetworkActionMessage(err instanceof Error ? err.message : "Could not load messages."); }
     }
     void loadMessages();
@@ -212,7 +212,35 @@ export default function App() {
   }
 
 
-  async function sendQuotation(event: FormEvent<HTMLFormElement>) {
+
+  async function uploadDealFile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!dealRoom || !selectedDealFile) return;
+    setFileBusy(true); setFileMessage("Preparing secure upload…");
+    try {
+      const upload = await networkRequest("/network/deal-rooms/" + dealRoom.id + "/files/upload-url", "POST", {
+        filename: selectedDealFile.name, content_type: selectedDealFile.type, size_bytes: selectedDealFile.size
+      });
+      const sent = await fetch(upload.upload_url, { method: "PUT", headers: upload.headers, body: selectedDealFile });
+      if (!sent.ok) throw new Error("The private storage upload failed. Please try again.");
+      setFileMessage("Upload received. Running malware scan…");
+      const completed = await networkRequest("/network/files/" + upload.file_id + "/complete", "POST") as DealFile;
+      setDealFiles(current => [completed, ...current.filter(file => file.id !== completed.id)]);
+      setSelectedDealFile(null);
+      const picker = document.getElementById("deal-room-file-picker") as HTMLInputElement | null;
+      if (picker) picker.value = "";
+      setFileMessage("Document uploaded, scanned and shared securely.");
+    } catch (err) { setFileMessage(err instanceof Error ? err.message : "Document upload failed."); }
+    finally { setFileBusy(false); }
+  }
+
+  async function downloadDealFile(file: DealFile) {
+    try {
+      const result = await networkRequest("/network/files/" + file.id + "/download-url", "POST");
+      window.open(result.download_url, "_blank", "noopener,noreferrer");
+    } catch (err) { setFileMessage(err instanceof Error ? err.message : "Secure download could not be created."); }
+  }
+\n  async function sendQuotation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!dealRoom) return;
     try {
@@ -459,7 +487,19 @@ export default function App() {
                 <div className="chat-heading"><div><strong>Deal Room</strong><span>Private negotiation space</span></div><select aria-label="Deal status" value={dealRoom.status} onChange={e=>updateDealStatus(e.target.value)}><option value="discussion">Discussion</option><option value="negotiation">Negotiation</option><option value="proposal_submitted">Proposal submitted</option><option value="agreement_reached">Agreement reached</option><option value="deal_completed">Deal completed</option><option value="deal_cancelled">Deal cancelled</option></select></div>
                 <div className="message-list deal-messages">{dealRoomMessages.map(message=><article className={"message-bubble "+(message.sender_business_id===session.business.id?"own":"")} key={message.id}><strong>{message.sender_business_name}</strong><p>{message.body}</p><time>{new Date(message.created_at).toLocaleString()}</time></article>)}{dealRoomMessages.length===0 && <p className="network-empty">Use this room for proposals, commercial terms and closing discussions.</p>}</div>
                 <form className="message-compose" onSubmit={sendDealRoomMessage}><input value={dealDraft} onChange={e=>setDealDraft(e.target.value)} maxLength={5000} placeholder="Write a Deal Room message…" required/><button type="submit" disabled={!dealDraft.trim()}>Send</button></form>
-                <div className="quotation-section">
+
+                <section className="deal-files-section">
+                  <div className="network-subheading"><h3>Documents & attachments</h3><span>{dealFiles.length} shared files</span></div>
+                  <p className="deal-files-help">Share proposals, catalogues, contracts for review and supporting documents. Files are private to these two businesses and only appear after a clean malware scan.</p>
+                  <form className="deal-file-upload" onSubmit={uploadDealFile}>
+                    <label className="deal-file-picker">Choose a document<input id="deal-room-file-picker" type="file" accept=".pdf,.docx,.xlsx,.pptx,.txt,.csv,.png,.jpg,.jpeg" onChange={event=>setSelectedDealFile(event.target.files?.[0] ?? null)}/></label>
+                    <span className="deal-file-selected">{selectedDealFile ? selectedDealFile.name + " · " + (selectedDealFile.size/1024/1024).toFixed(2) + " MB" : "PDF, Word, Excel, PowerPoint, TXT, CSV or images · max 25 MB"}</span>
+                    <button className="network-primary-button" type="submit" disabled={!selectedDealFile || fileBusy}>{fileBusy ? "Uploading securely…" : "Upload and share"}</button>
+                  </form>
+                  {fileMessage && <p className="deal-file-message" role="status">{fileMessage}</p>}
+                  <div className="deal-file-list">{dealFiles.map(file=><article className="deal-file-card" key={file.id}><div className="deal-file-icon"><FileText size={18}/></div><div className="deal-file-info"><strong>{file.original_filename}</strong><span>Shared by {file.uploader_business_name} · {(file.size_bytes/1024/1024).toFixed(2)} MB</span></div><button type="button" className="network-secondary-button" onClick={()=>downloadDealFile(file)}>Download</button></article>)}{dealFiles.length===0 && <p className="network-empty">No scanned documents shared yet.</p>}</div>
+                </section>
+\n                <div className="quotation-section">
                   <div className="network-subheading"><h3>Shared quotations</h3><span>{quotations.length} quotations</span></div>
                   {quotations.map(quote=><article className="quotation-card" key={quote.id}>
                     <div className="quotation-card-head"><div><strong>{quote.title}</strong><small>{quote.reference} · from {quote.issuer_business_name}</small></div><span className={"quotation-status status-"+quote.status}>{quote.status.replaceAll("_"," ")}</span></div>
