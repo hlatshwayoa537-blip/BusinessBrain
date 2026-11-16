@@ -111,3 +111,63 @@ class PublicBusinessResponse(BaseModel):
     city: str | None = None
     province: str | None = None
     description: str | None = None
+
+
+class ConversationInviteCreate(BaseModel):
+    invited_business_id: str = Field(min_length=36, max_length=36)
+    invitation_message: str | None = Field(default=None, max_length=1000)
+    access_password: Annotated[str, StringConstraints(min_length=8, max_length=128)]
+
+class InvitationDecision(BaseModel):
+    access_password: Annotated[str, StringConstraints(min_length=8, max_length=128)]
+
+class InvitationResponse(BaseModel):
+    id: str
+    host_business_id: str
+    host_business_name: str
+    invited_business_id: str
+    invited_business_name: str
+    invitation_message: str | None = None
+    status: str
+    expires_at: object
+    created_at: object
+
+class ConversationMessageCreate(BaseModel):
+    body: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=5000)]
+
+class ConversationMessageResponse(BaseModel):
+    id: str
+    sender_business_id: str
+    sender_business_name: str
+    sender_user_name: str
+    body: str
+    created_at: object
+
+class ConversationResponse(BaseModel):
+    id: str
+    host_business_id: str
+    host_business_name: str
+    invited_business_id: str
+    invited_business_name: str
+    status: str
+    created_at: object
+    deal_room_id: str | None = None
+    deal_room_status: str | None = None
+
+class DealRoomStatusUpdate(BaseModel):
+    status: Annotated[str, StringConstraints(pattern=r"^(discussion|negotiation|proposal_submitted|agreement_reached|deal_completed|deal_cancelled)$")]
+
+class DealRoomResponse(BaseModel):
+    id: str
+    conversation_id: str
+    status: str
+    created_at: object
+    updated_at: object
+
+class DealRoomMessageResponse(BaseModel):
+    id: str
+    sender_business_id: str
+    sender_business_name: str
+    sender_user_name: str
+    body: str
+    created_at: object
