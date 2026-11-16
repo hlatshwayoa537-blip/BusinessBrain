@@ -33,6 +33,38 @@ class UserResponse(BaseModel):
     email: str
     full_name: str
 
+class BusinessProfileUpdate(BaseModel):
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=200)] | None = None
+    industry: Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=120)] | None = None
+    country: Annotated[str, StringConstraints(pattern=r"^[A-Za-z]{2}$")] | None = None
+    registration_number: str | None = Field(default=None, max_length=100)
+    website: str | None = Field(default=None, max_length=255)
+    contact_email: EmailStr | None = None
+    phone: str | None = Field(default=None, max_length=40)
+    address_line: str | None = Field(default=None, max_length=255)
+    city: str | None = Field(default=None, max_length=120)
+    province: str | None = Field(default=None, max_length=120)
+    postal_code: str | None = Field(default=None, max_length=24)
+    description: str | None = Field(default=None, max_length=2000)
+    profile_image_data_url: str | None = Field(default=None, max_length=2_800_000)
+
+    @field_validator("website")
+    @classmethod
+    def validate_website(cls, value: str | None) -> str | None:
+        if value and not value.startswith(("https://", "http://")):
+            raise ValueError("Website must start with https:// or http://.")
+        return value
+
+    @field_validator("profile_image_data_url")
+    @classmethod
+    def validate_profile_image(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        allowed = ("data:image/jpeg;base64,", "data:image/png;base64,", "data:image/webp;base64,")
+        if not value.startswith(allowed):
+            raise ValueError("Profile image must be a JPEG, PNG or WebP image.")
+        return value
+
 class BusinessResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
@@ -40,6 +72,15 @@ class BusinessResponse(BaseModel):
     industry: str
     country: str
     profile_image_data_url: str | None = None
+    registration_number: str | None = None
+    website: str | None = None
+    contact_email: str | None = None
+    phone: str | None = None
+    address_line: str | None = None
+    city: str | None = None
+    province: str | None = None
+    postal_code: str | None = None
+    description: str | None = None
 
 class AuthResponse(BaseModel):
     access_token: str
