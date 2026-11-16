@@ -78,3 +78,24 @@ For automated tests, the test suite overrides the database dependency with an is
 Implemented: initial React dashboard shell, FastAPI health endpoint, registration, login, signed bearer tokens, authenticated user profile, user/business/owner-membership persistence and initial Alembic schema migration.
 
 Not yet implemented: email verification, password reset, refresh-token rotation, team invitations, subscription assessment, business onboarding UI and production deployment. These must not be represented as live until implemented and tested.
+
+
+## Business Network: private conversations and Deal Rooms
+
+The Business Network supports authenticated, invitation-only business conversations. A host selects a listed business, sets a conversation password, and sends an invitation. The password is stored as a one-way password hash and must be shared separately with the recipient; it is never included in the invitation response or notification.
+
+Recipients can view incoming invitations, accept only after entering the password, or reject them. Invitations expire after seven days. Acceptance creates a private conversation between the two business workspaces.
+
+Conversation and Deal Room endpoints require an authenticated member of one of the two participating businesses. Messages are scoped to that conversation or Deal Room. Either participant can create the single Deal Room associated with a conversation and update its status: discussion, negotiation, proposal submitted, agreement reached, deal completed, or deal cancelled.
+
+Key API routes (under `/api/v1`):
+
+- `POST /network/invitations`, `GET /network/invitations?direction=incoming|outgoing|all`
+- `POST /network/invitations/{id}/accept`, `POST /network/invitations/{id}/reject`
+- `GET /network/conversations`, `GET|POST /network/conversations/{id}/messages`
+- `POST /network/conversations/{id}/deal-room`
+- `GET|POST /network/deal-rooms/{id}/messages`, `PATCH /network/deal-rooms/{id}`
+
+Migration `0005_business_conversations_deal_rooms` creates the invitation, conversation, message and Deal Room tables. Apply migrations with `alembic upgrade head` before using these routes in a deployed environment.
+
+This initial release provides authenticated request/response messaging, not real-time push notifications, file attachments, video calls, contract e-signatures or legal deal execution. Any binding commercial agreement still requires authorised human review and approval.
