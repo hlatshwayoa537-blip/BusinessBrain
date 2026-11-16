@@ -6,6 +6,10 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api
 type ApiStatus = "checking" | "online" | "offline";
 type BusinessProfile = { name: string; industry: string; country: string; profile_image_data_url?: string | null; registration_number?: string | null; website?: string | null; contact_email?: string | null; phone?: string | null; address_line?: string | null; city?: string | null; province?: string | null; postal_code?: string | null; description?: string | null; directory_listed?: boolean; public_email?: boolean; public_phone?: boolean; public_website?: boolean; public_location?: boolean };
 type PublicBusiness = { id: string; name: string; industry: string; country: string; profile_image_data_url?: string | null; website?: string | null; contact_email?: string | null; phone?: string | null; city?: string | null; province?: string | null; description?: string | null };
+type NetworkInvitation = { id: string; host_business_id: string; host_business_name: string; invited_business_id: string; invited_business_name: string; invitation_message?: string | null; status: string; expires_at: string; created_at: string };
+type NetworkConversation = { id: string; host_business_id: string; host_business_name: string; invited_business_id: string; invited_business_name: string; status: string; created_at: string; deal_room_id?: string | null; deal_room_status?: string | null };
+type NetworkMessage = { id: string; sender_business_id: string; sender_business_name: string; sender_user_name: string; body: string; created_at: string };
+type DealRoom = { id: string; conversation_id: string; status: string; created_at: string; updated_at: string };
 type AuthData = { access_token: string; user: { id: string; email: string; full_name: string }; business: BusinessProfile & { id: string } };
 const STORAGE_KEY = "businessbrain.session";
 const modules = [
@@ -55,6 +59,20 @@ export default function App() {
   const [directoryQuery, setDirectoryQuery] = useState("");
   const [directoryBusy, setDirectoryBusy] = useState(false);
   const [directoryMessage, setDirectoryMessage] = useState("");
+  const [incomingInvitations, setIncomingInvitations] = useState<NetworkInvitation[]>([]);
+  const [conversations, setConversations] = useState<NetworkConversation[]>([]);
+  const [selectedConversation, setSelectedConversation] = useState<NetworkConversation | null>(null);
+  const [conversationMessages, setConversationMessages] = useState<NetworkMessage[]>([]);
+  const [dealRoomMessages, setDealRoomMessages] = useState<NetworkMessage[]>([]);
+  const [dealRoom, setDealRoom] = useState<DealRoom | null>(null);
+  const [inviteTarget, setInviteTarget] = useState<PublicBusiness | null>(null);
+  const [invitePassword, setInvitePassword] = useState("");
+  const [inviteMessage, setInviteMessage] = useState("");
+  const [acceptPassword, setAcceptPassword] = useState("");
+  const [conversationDraft, setConversationDraft] = useState("");
+  const [dealDraft, setDealDraft] = useState("");
+  const [networkActionBusy, setNetworkActionBusy] = useState(false);
+  const [networkActionMessage, setNetworkActionMessage] = useState("");
 
   function handleProfileImage(file?: File) {
     setImageError("");
