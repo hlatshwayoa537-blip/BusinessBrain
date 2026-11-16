@@ -11,7 +11,8 @@ type NetworkConversation = { id: string; host_business_id: string; host_business
 type NetworkMessage = { id: string; sender_business_id: string; sender_business_name: string; sender_user_name: string; body: string; created_at: string };
 type DealRoom = { id: string; conversation_id: string; status: string; created_at: string; updated_at: string };
 type Quotation = { id: string; deal_room_id: string; issuer_business_id: string; issuer_business_name: string; reference: string; title: string; currency: string; line_items: {description:string;quantity:string;unit_price:string;tax_rate:string;line_subtotal:string;line_tax:string;line_total:string}[]; subtotal: string; tax_total: string; total: string; notes?: string | null; valid_until?: string | null; status: string; response_note?: string | null; created_at: string };
-type QuoteLineDraft = { description: string; quantity: string; unit_price: string; tax_rate: string };\ntype DealFile = { id: string; deal_room_id: string; uploader_business_id: string; uploader_business_name: string; original_filename: string; content_type: string; size_bytes: number; status: string; created_at: string };
+type QuoteLineDraft = { description: string; quantity: string; unit_price: string; tax_rate: string };
+type DealFile = { id: string; deal_room_id: string; uploader_business_id: string; uploader_business_name: string; original_filename: string; content_type: string; size_bytes: number; status: string; created_at: string };
 type AuthData = { access_token: string; user: { id: string; email: string; full_name: string }; business: BusinessProfile & { id: string } };
 const STORAGE_KEY = "businessbrain.session";
 const modules = [
@@ -67,7 +68,11 @@ export default function App() {
   const [conversationMessages, setConversationMessages] = useState<NetworkMessage[]>([]);
   const [dealRoomMessages, setDealRoomMessages] = useState<NetworkMessage[]>([]);
   const [dealRoom, setDealRoom] = useState<DealRoom | null>(null);
-  const [quotations, setQuotations] = useState<Quotation[]>([]);\n  const [dealFiles, setDealFiles] = useState<DealFile[]>([]);\n  const [selectedDealFile, setSelectedDealFile] = useState<File | null>(null);\n  const [fileBusy, setFileBusy] = useState(false);\n  const [fileMessage, setFileMessage] = useState("");
+  const [quotations, setQuotations] = useState<Quotation[]>([]);
+  const [dealFiles, setDealFiles] = useState<DealFile[]>([]);
+  const [selectedDealFile, setSelectedDealFile] = useState<File | null>(null);
+  const [fileBusy, setFileBusy] = useState(false);
+  const [fileMessage, setFileMessage] = useState("");
   const [quoteTitle, setQuoteTitle] = useState("");
   const [quoteCurrency, setQuoteCurrency] = useState("ZAR");
   const [quoteValidUntil, setQuoteValidUntil] = useState("");
@@ -240,7 +245,8 @@ export default function App() {
       window.open(result.download_url, "_blank", "noopener,noreferrer");
     } catch (err) { setFileMessage(err instanceof Error ? err.message : "Secure download could not be created."); }
   }
-\n  async function sendQuotation(event: FormEvent<HTMLFormElement>) {
+
+  async function sendQuotation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!dealRoom) return;
     try {
@@ -499,7 +505,8 @@ export default function App() {
                   {fileMessage && <p className="deal-file-message" role="status">{fileMessage}</p>}
                   <div className="deal-file-list">{dealFiles.map(file=><article className="deal-file-card" key={file.id}><div className="deal-file-icon"><FileText size={18}/></div><div className="deal-file-info"><strong>{file.original_filename}</strong><span>Shared by {file.uploader_business_name} · {(file.size_bytes/1024/1024).toFixed(2)} MB</span></div><button type="button" className="network-secondary-button" onClick={()=>downloadDealFile(file)}>Download</button></article>)}{dealFiles.length===0 && <p className="network-empty">No scanned documents shared yet.</p>}</div>
                 </section>
-\n                <div className="quotation-section">
+
+                <div className="quotation-section">
                   <div className="network-subheading"><h3>Shared quotations</h3><span>{quotations.length} quotations</span></div>
                   {quotations.map(quote=><article className="quotation-card" key={quote.id}>
                     <div className="quotation-card-head"><div><strong>{quote.title}</strong><small>{quote.reference} · from {quote.issuer_business_name}</small></div><span className={"quotation-status status-"+quote.status}>{quote.status.replaceAll("_"," ")}</span></div>
