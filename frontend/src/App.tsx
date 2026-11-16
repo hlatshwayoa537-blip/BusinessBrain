@@ -4,7 +4,8 @@ import { Activity, ArrowUpRight, Bot, BriefcaseBusiness, Building2, ChartNoAxesC
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
 type ApiStatus = "checking" | "online" | "offline";
-type AuthData = { access_token: string; user: { id: string; email: string; full_name: string }; business: { id: string; name: string; industry: string; country: string; profile_image_data_url?: string | null } };
+type BusinessProfile = { name: string; industry: string; country: string; profile_image_data_url?: string | null; registration_number?: string | null; website?: string | null; contact_email?: string | null; phone?: string | null; address_line?: string | null; city?: string | null; province?: string | null; postal_code?: string | null; description?: string | null };
+type AuthData = { access_token: string; user: { id: string; email: string; full_name: string }; business: BusinessProfile & { id: string } };
 const STORAGE_KEY = "businessbrain.session";
 const modules = [
   { icon: ChartNoAxesCombined, title: "Financial Intelligence", detail: "Understand your business finances", tag: "Coming next" },
@@ -36,6 +37,16 @@ export default function App() {
   const [country, setCountry] = useState("ZA");
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [imageError, setImageError] = useState("");
+  const [profileDraft, setProfileDraft] = useState<BusinessProfile>(() => ({
+    name: session?.business.name ?? "", industry: session?.business.industry ?? "", country: session?.business.country ?? "ZA",
+    registration_number: session?.business.registration_number ?? "", website: session?.business.website ?? "",
+    contact_email: session?.business.contact_email ?? "", phone: session?.business.phone ?? "",
+    address_line: session?.business.address_line ?? "", city: session?.business.city ?? "",
+    province: session?.business.province ?? "", postal_code: session?.business.postal_code ?? "",
+    description: session?.business.description ?? "", profile_image_data_url: session?.business.profile_image_data_url ?? null,
+  }));
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [profileMessage, setProfileMessage] = useState("");
 
   function handleProfileImage(file?: File) {
     setImageError("");
@@ -43,7 +54,7 @@ export default function App() {
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { setImageError("Choose a JPG, PNG or WebP image."); return; }
     if (file.size > 2 * 1024 * 1024) { setImageError("The image must be 2 MB or smaller."); return; }
     const reader = new FileReader();
-    reader.onload = () => setProfileImage(typeof reader.result === "string" ? reader.result : null);
+    reader.onload = () => { const image = typeof reader.result === "string" ? reader.result : null; setProfileImage(image); setProfileDraft(current => ({ ...current, profile_image_data_url: image })); };
     reader.onerror = () => setImageError("Image could not be read. Please try another file.");
     reader.readAsDataURL(file);
   }
