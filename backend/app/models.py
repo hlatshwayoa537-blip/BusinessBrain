@@ -137,3 +137,32 @@ class DealRoomFile(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class JobPosting(Base):
+    __tablename__ = "job_postings"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(180), nullable=False)
+    department: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    employment_type: Mapped[str] = mapped_column(String(30), nullable=False, default="full_time")
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    requirements: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+class JobApplication(Base):
+    __tablename__ = "job_applications"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    job_id: Mapped[str] = mapped_column(ForeignKey("job_postings.id", ondelete="CASCADE"), nullable=False, index=True)
+    applicant_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    experience: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    resume_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    cover_letter: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="new", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
