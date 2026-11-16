@@ -33,6 +33,11 @@ class Business(Base):
     province: Mapped[str | None] = mapped_column(String(120), nullable=True)
     postal_code: Mapped[str | None] = mapped_column(String(24), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    directory_listed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    public_email: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    public_phone: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    public_website: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    public_location: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     memberships: Mapped[list["Membership"]] = relationship(back_populates="business")
 
