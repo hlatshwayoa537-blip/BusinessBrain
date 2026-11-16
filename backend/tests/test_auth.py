@@ -106,3 +106,69 @@ def test_business_network_directory_excludes_unlisted_businesses(client):
 def test_business_network_directory_requires_authentication(client):
     response = client.get("/api/v1/network/businesses")
     assert response.status_code == 401
+
+
+def register_second_business(client):
+    payload = registration_payload("supplier@example.com")
+    payload.update({"full_name":"Supplier Owner","business_name":"Supplier Co","industry":"Manufacturing"})
+    response = client.post("/api/v1/auth/register", json=payload)
+    assert response.status_code == 201
+    return response.json()
+
+def test_private_invitation_requires_password_and_creates_conversation(client):
+    host_headers = auth_headers(client)
+    recipient = register_second_business(client)
+    recipient_headers = {"Authorization": f"Bearer {recipient['access_token']}"}
+    visible = client.patch("/api/v1/auth/business/profile", headers=recipient_headers, json={"directory_listed":True})
+    assert visible.status_code == 200
+    invite = client.post("/api/v1/network/invitations", headers=host_headers, json={
+        "invited_business_id": recipient["business"]["id"],
+        "invitation_message":"We would like to discuss a supplier partnership.",
+        "access_password":"Separate-Secret-42"
+    })
+    assert invite.status_code == 201
+    invitation_id = invite.json()["id"]
+    wrong = client.post(f"/api/v1/network/invitations/{invitation_id}/accept", headers=recipient_headers, json={"access_password":"Wrong-Password-42"})
+    assert wrong.status_code == 403
+    accepted = client.post(f"/api/v1/network/invitations/{invitation_id}/accept", headers=recipient_headers, json={"access_password":"Separate-Secret-42"})
+    assert accepted.status_code == 200
+    assert accepted.json()["host_business_id"] != accepted.json()["invited_business_id"]
+    assert client.get("/api/v1/network/conversations", headers=host_headers).json()[0]["id"] == accepted.json()["id"]
+
+def test_conversation_messages_and_deal_room_are_shared_only_with_participants(client):
+    host_headers = auth_headers(client)
+    recipient = register_second_business(client)
+    recipient_headers = {"Authorization": f"Bearer {recipient['access_token']}"}
+    client.patch("/api/v1/auth/business/profile", headers=recipient_headers, json={"directory_listed":True})
+    invite = client.post("/api/v1/network/invitations", headers=host_headers, json={
+        "invited_business_id":recipient["business"]["id"],"access_password":"Separate-Secret-42"
+    }).json()
+    conversation = client.post(f"/api/v1/network/invitations/{invite['id']}/accept", headers=recipient_headers, json={"access_password":"Separate-Secret-42"}).json()
+    conversation_id = conversation["id"]
+    sent = client.post(f"/api/v1/network/conversations/{conversation_id}/messages", headers=host_headers, json={"body":"Hello, let's discuss a partnership."})
+    assert sent.status_code == 201
+    received = client.get(f"/api/v1/network/conversations/{conversation_id}/messages", headers=recipient_headers)
+    assert received.status_code == 200
+    assert received.json()[0]["body"] == "Hello, let's discuss a partnership."
+    room = client.post(f"/api/v1/network/conversations/{conversation_id}/deal-room", headers=recipient_headers)
+    assert room.status_code == 201
+    room_id = room.json()["id"]
+    deal_message = client.post(f"/api/v1/network/deal-rooms/{room_id}/messages", headers=host_headers, json={"body":"Our proposal is ready for review."})
+    assert deal_message.status_code == 201
+    status_update = client.patch(f"/api/v1/network/deal-rooms/{room_id}", headers=recipient_headers, json={"status":"proposal_submitted"})
+    assert status_update.status_code == 200
+    assert status_update.json()["status"] == "proposal_submitted"
+
+def test_business_cannot_read_another_business_conversation(client):
+    host_headers = auth_headers(client)
+    recipient = register_second_business(client)
+    outsider = registration_payload("outsider@example.com")
+    outsider.update({"full_name":"Outsider","business_name":"Outsider Ltd","industry":"Services"})
+    outsider_auth = client.post("/api/v1/auth/register", json=outsider).json()
+    recipient_headers = {"Authorization":f"Bearer {recipient['access_token']}"}
+    client.patch("/api/v1/auth/business/profile", headers=recipient_headers, json={"directory_listed":True})
+    invite = client.post("/api/v1/network/invitations", headers=host_headers, json={"invited_business_id":recipient["business"]["id"],"access_password":"Separate-Secret-42"}).json()
+    conversation = client.post(f"/api/v1/network/invitations/{invite['id']}/accept", headers=recipient_headers, json={"access_password":"Separate-Secret-42"}).json()
+    outsider_headers = {"Authorization":f"Bearer {outsider_auth['access_token']}"}
+    response = client.get(f"/api/v1/network/conversations/{conversation['id']}/messages", headers=outsider_headers)
+    assert response.status_code == 404
