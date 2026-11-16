@@ -21,10 +21,12 @@ def s3_client():
         config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
     )
 
-def presigned_upload(key: str, content_type: str) -> str:
-    return s3_client().generate_presigned_url(
-        "put_object",
-        Params={"Bucket": settings.s3_bucket, "Key": key, "ContentType": content_type},
+def presigned_upload(key: str, content_type: str, max_bytes: int) -> dict:
+    return s3_client().generate_presigned_post(
+        Bucket=settings.s3_bucket,
+        Key=key,
+        Fields={"Content-Type": content_type},
+        Conditions=[{"Content-Type": content_type}, ["content-length-range", 1, max_bytes]],
         ExpiresIn=settings.s3_upload_url_expire_seconds,
     )
 
