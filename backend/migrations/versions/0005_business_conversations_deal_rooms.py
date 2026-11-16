@@ -2,7 +2,7 @@
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0005_business_conversations_deal_rooms"
+revision = "0005_business_conversations"
 down_revision = "0004_business_network_visibility"
 branch_labels = None
 depends_on = None
