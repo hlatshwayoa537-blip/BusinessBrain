@@ -77,8 +77,8 @@ def decide_quotation(quotation_id: str, payload: QuotationDecision, current_user
     quote = db.get(DealRoomQuotation, quotation_id)
     if not quote:
         raise HTTPException(status_code=404, detail="Quotation not found.")
-    _, recipient_id = _room_for_member(db, quote.deal_room_id, business.id)
-    if business.id != recipient_id:
+    _, _ = _room_for_member(db, quote.deal_room_id, business.id)
+    if business.id == quote.issuer_business_id:
         raise HTTPException(status_code=403, detail="Only the receiving business can accept or decline this quotation.")
     if quote.status != "sent":
         raise HTTPException(status_code=409, detail="This quotation has already been responded to or withdrawn.")
