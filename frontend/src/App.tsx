@@ -9,7 +9,9 @@ type PublicBusiness = { id: string; name: string; industry: string; country: str
 type NetworkInvitation = { id: string; host_business_id: string; host_business_name: string; invited_business_id: string; invited_business_name: string; invitation_message?: string | null; status: string; expires_at: string; created_at: string };
 type NetworkConversation = { id: string; host_business_id: string; host_business_name: string; invited_business_id: string; invited_business_name: string; status: string; created_at: string; deal_room_id?: string | null; deal_room_status?: string | null };
 type NetworkMessage = { id: string; sender_business_id: string; sender_business_name: string; sender_user_name: string; body: string; created_at: string };
-type DealRoom = { id: string; conversation_id: string; status: string; created_at: string; updated_at: string };\ntype Quotation = { id: string; deal_room_id: string; issuer_business_id: string; issuer_business_name: string; reference: string; title: string; currency: string; line_items: {description:string;quantity:string;unit_price:string;tax_rate:string;line_subtotal:string;line_tax:string;line_total:string}[]; subtotal: string; tax_total: string; total: string; notes?: string | null; valid_until?: string | null; status: string; response_note?: string | null; created_at: string };\ntype QuoteLineDraft = { description: string; quantity: string; unit_price: string; tax_rate: string };
+type DealRoom = { id: string; conversation_id: string; status: string; created_at: string; updated_at: string };
+type Quotation = { id: string; deal_room_id: string; issuer_business_id: string; issuer_business_name: string; reference: string; title: string; currency: string; line_items: {description:string;quantity:string;unit_price:string;tax_rate:string;line_subtotal:string;line_tax:string;line_total:string}[]; subtotal: string; tax_total: string; total: string; notes?: string | null; valid_until?: string | null; status: string; response_note?: string | null; created_at: string };
+type QuoteLineDraft = { description: string; quantity: string; unit_price: string; tax_rate: string };
 type AuthData = { access_token: string; user: { id: string; email: string; full_name: string }; business: BusinessProfile & { id: string } };
 const STORAGE_KEY = "businessbrain.session";
 const modules = [
@@ -64,7 +66,13 @@ export default function App() {
   const [selectedConversation, setSelectedConversation] = useState<NetworkConversation | null>(null);
   const [conversationMessages, setConversationMessages] = useState<NetworkMessage[]>([]);
   const [dealRoomMessages, setDealRoomMessages] = useState<NetworkMessage[]>([]);
-  const [dealRoom, setDealRoom] = useState<DealRoom | null>(null);\n  const [quotations, setQuotations] = useState<Quotation[]>([]);\n  const [quoteTitle, setQuoteTitle] = useState("");\n  const [quoteCurrency, setQuoteCurrency] = useState("ZAR");\n  const [quoteValidUntil, setQuoteValidUntil] = useState("");\n  const [quoteNotes, setQuoteNotes] = useState("");\n  const [quoteLines, setQuoteLines] = useState<QuoteLineDraft[]>([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
+  const [dealRoom, setDealRoom] = useState<DealRoom | null>(null);
+  const [quotations, setQuotations] = useState<Quotation[]>([]);
+  const [quoteTitle, setQuoteTitle] = useState("");
+  const [quoteCurrency, setQuoteCurrency] = useState("ZAR");
+  const [quoteValidUntil, setQuoteValidUntil] = useState("");
+  const [quoteNotes, setQuoteNotes] = useState("");
+  const [quoteLines, setQuoteLines] = useState<QuoteLineDraft[]>([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
   const [inviteTarget, setInviteTarget] = useState<PublicBusiness | null>(null);
   const [invitePassword, setInvitePassword] = useState("");
   const [inviteMessage, setInviteMessage] = useState("");
@@ -131,7 +139,8 @@ export default function App() {
         if (selectedConversation!.deal_room_id) {
           const room = { id: selectedConversation!.deal_room_id, conversation_id: selectedConversation!.id, status: selectedConversation!.deal_room_status ?? "discussion", created_at: "", updated_at: "" };
           const dealMessages = await networkRequest("/network/deal-rooms/" + room.id + "/messages");
-          const dealQuotes = await networkRequest("/network/deal-rooms/" + room.id + "/quotations");\n          if (!cancelled) { setDealRoom(room); setDealRoomMessages(dealMessages as NetworkMessage[]); setQuotations(dealQuotes as Quotation[]); }
+          const dealQuotes = await networkRequest("/network/deal-rooms/" + room.id + "/quotations");
+          if (!cancelled) { setDealRoom(room); setDealRoomMessages(dealMessages as NetworkMessage[]); setQuotations(dealQuotes as Quotation[]); }
         } else if (!cancelled) { setDealRoom(null); setDealRoomMessages([]); setQuotations([]); }
       } catch (err) { if (!cancelled) setNetworkActionMessage(err instanceof Error ? err.message : "Could not load messages."); }
     }
@@ -224,7 +233,8 @@ export default function App() {
       setQuotations(current => current.map(item => item.id === quotationId ? updated : item));
     } catch (err) { setNetworkActionMessage(err instanceof Error ? err.message : "Quotation response could not be saved."); }
   }
-\n  async function updateDealStatus(status: string) {
+
+  async function updateDealStatus(status: string) {
     if (!dealRoom) return;
     try {
       const updated = await networkRequest("/network/deal-rooms/" + dealRoom.id, "PATCH", { status }) as DealRoom;
