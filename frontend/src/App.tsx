@@ -9,7 +9,7 @@ type PublicBusiness = { id: string; name: string; industry: string; country: str
 type NetworkInvitation = { id: string; host_business_id: string; host_business_name: string; invited_business_id: string; invited_business_name: string; invitation_message?: string | null; status: string; expires_at: string; created_at: string };
 type NetworkConversation = { id: string; host_business_id: string; host_business_name: string; invited_business_id: string; invited_business_name: string; status: string; created_at: string; deal_room_id?: string | null; deal_room_status?: string | null };
 type NetworkMessage = { id: string; sender_business_id: string; sender_business_name: string; sender_user_name: string; body: string; created_at: string };
-type DealRoom = { id: string; conversation_id: string; status: string; created_at: string; updated_at: string };
+type DealRoom = { id: string; conversation_id: string; status: string; created_at: string; updated_at: string };\ntype Quotation = { id: string; deal_room_id: string; issuer_business_id: string; issuer_business_name: string; reference: string; title: string; currency: string; line_items: {description:string;quantity:string;unit_price:string;tax_rate:string;line_subtotal:string;line_tax:string;line_total:string}[]; subtotal: string; tax_total: string; total: string; notes?: string | null; valid_until?: string | null; status: string; response_note?: string | null; created_at: string };\ntype QuoteLineDraft = { description: string; quantity: string; unit_price: string; tax_rate: string };
 type AuthData = { access_token: string; user: { id: string; email: string; full_name: string }; business: BusinessProfile & { id: string } };
 const STORAGE_KEY = "businessbrain.session";
 const modules = [
@@ -64,7 +64,7 @@ export default function App() {
   const [selectedConversation, setSelectedConversation] = useState<NetworkConversation | null>(null);
   const [conversationMessages, setConversationMessages] = useState<NetworkMessage[]>([]);
   const [dealRoomMessages, setDealRoomMessages] = useState<NetworkMessage[]>([]);
-  const [dealRoom, setDealRoom] = useState<DealRoom | null>(null);
+  const [dealRoom, setDealRoom] = useState<DealRoom | null>(null);\n  const [quotations, setQuotations] = useState<Quotation[]>([]);\n  const [quoteTitle, setQuoteTitle] = useState("");\n  const [quoteCurrency, setQuoteCurrency] = useState("ZAR");\n  const [quoteValidUntil, setQuoteValidUntil] = useState("");\n  const [quoteNotes, setQuoteNotes] = useState("");\n  const [quoteLines, setQuoteLines] = useState<QuoteLineDraft[]>([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
   const [inviteTarget, setInviteTarget] = useState<PublicBusiness | null>(null);
   const [invitePassword, setInvitePassword] = useState("");
   const [inviteMessage, setInviteMessage] = useState("");
@@ -131,8 +131,8 @@ export default function App() {
         if (selectedConversation!.deal_room_id) {
           const room = { id: selectedConversation!.deal_room_id, conversation_id: selectedConversation!.id, status: selectedConversation!.deal_room_status ?? "discussion", created_at: "", updated_at: "" };
           const dealMessages = await networkRequest("/network/deal-rooms/" + room.id + "/messages");
-          if (!cancelled) { setDealRoom(room); setDealRoomMessages(dealMessages as NetworkMessage[]); }
-        } else if (!cancelled) { setDealRoom(null); setDealRoomMessages([]); }
+          const dealQuotes = await networkRequest("/network/deal-rooms/" + room.id + "/quotations");\n          if (!cancelled) { setDealRoom(room); setDealRoomMessages(dealMessages as NetworkMessage[]); setQuotations(dealQuotes as Quotation[]); }
+        } else if (!cancelled) { setDealRoom(null); setDealRoomMessages([]); setQuotations([]); }
       } catch (err) { if (!cancelled) setNetworkActionMessage(err instanceof Error ? err.message : "Could not load messages."); }
     }
     void loadMessages();
@@ -202,7 +202,29 @@ export default function App() {
     } catch (err) { setNetworkActionMessage(err instanceof Error ? err.message : "Deal Room message could not be sent."); }
   }
 
-  async function updateDealStatus(status: string) {
+
+  async function sendQuotation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!dealRoom) return;
+    try {
+      const quote = await networkRequest("/network/deal-rooms/" + dealRoom.id + "/quotations", "POST", {
+        title: quoteTitle, currency: quoteCurrency, valid_until: quoteValidUntil || null, notes: quoteNotes || null,
+        line_items: quoteLines.map(line => ({...line, quantity: Number(line.quantity), unit_price: Number(line.unit_price), tax_rate: Number(line.tax_rate)}))
+      }) as Quotation;
+      setQuotations(current => [quote, ...current]);
+      setQuoteTitle(""); setQuoteValidUntil(""); setQuoteNotes("");
+      setQuoteLines([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
+      setNetworkActionMessage("Quotation " + quote.reference + " shared in this Deal Room.");
+    } catch (err) { setNetworkActionMessage(err instanceof Error ? err.message : "Quotation could not be shared."); }
+  }
+
+  async function decideQuotation(quotationId: string, decision: "accepted" | "declined") {
+    try {
+      const updated = await networkRequest("/network/quotations/" + quotationId + "/decision", "POST", {decision}) as Quotation;
+      setQuotations(current => current.map(item => item.id === quotationId ? updated : item));
+    } catch (err) { setNetworkActionMessage(err instanceof Error ? err.message : "Quotation response could not be saved."); }
+  }
+\n  async function updateDealStatus(status: string) {
     if (!dealRoom) return;
     try {
       const updated = await networkRequest("/network/deal-rooms/" + dealRoom.id, "PATCH", { status }) as DealRoom;
@@ -427,6 +449,38 @@ export default function App() {
                 <div className="chat-heading"><div><strong>Deal Room</strong><span>Private negotiation space</span></div><select aria-label="Deal status" value={dealRoom.status} onChange={e=>updateDealStatus(e.target.value)}><option value="discussion">Discussion</option><option value="negotiation">Negotiation</option><option value="proposal_submitted">Proposal submitted</option><option value="agreement_reached">Agreement reached</option><option value="deal_completed">Deal completed</option><option value="deal_cancelled">Deal cancelled</option></select></div>
                 <div className="message-list deal-messages">{dealRoomMessages.map(message=><article className={"message-bubble "+(message.sender_business_id===session.business.id?"own":"")} key={message.id}><strong>{message.sender_business_name}</strong><p>{message.body}</p><time>{new Date(message.created_at).toLocaleString()}</time></article>)}{dealRoomMessages.length===0 && <p className="network-empty">Use this room for proposals, commercial terms and closing discussions.</p>}</div>
                 <form className="message-compose" onSubmit={sendDealRoomMessage}><input value={dealDraft} onChange={e=>setDealDraft(e.target.value)} maxLength={5000} placeholder="Write a Deal Room message…" required/><button type="submit" disabled={!dealDraft.trim()}>Send</button></form>
+                <div className="quotation-section">
+                  <div className="network-subheading"><h3>Shared quotations</h3><span>{quotations.length} quotations</span></div>
+                  {quotations.map(quote=><article className="quotation-card" key={quote.id}>
+                    <div className="quotation-card-head"><div><strong>{quote.title}</strong><small>{quote.reference} · from {quote.issuer_business_name}</small></div><span className={"quotation-status status-"+quote.status}>{quote.status.replaceAll("_"," ")}</span></div>
+                    <div className="quotation-lines">{quote.line_items.map((line,index)=><div key={index}><span>{line.description} × {line.quantity}</span><strong>{quote.currency} {Number(line.line_total).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></div>)}</div>
+                    <div className="quotation-totals"><span>Subtotal {quote.currency} {Number(quote.subtotal).toLocaleString(undefined,{minimumFractionDigits:2})}</span><span>Tax {quote.currency} {Number(quote.tax_total).toLocaleString(undefined,{minimumFractionDigits:2})}</span><strong>Total {quote.currency} {Number(quote.total).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+                    {quote.notes && <p>{quote.notes}</p>}
+                    {quote.response_note && <p className="directory-meta">Response: {quote.response_note}</p>}
+                    {quote.status==="sent" && quote.issuer_business_id!==session.business.id && <div className="invitation-actions"><button type="button" className="network-primary-button" onClick={()=>decideQuotation(quote.id,"accepted")}>Accept quotation</button><button type="button" className="network-secondary-button" onClick={()=>decideQuotation(quote.id,"declined")}>Decline</button></div>}
+                  </article>)}
+                  {quotations.length===0 && <p className="network-empty">No quotations have been shared in this Deal Room yet.</p>}
+                  <form className="quotation-form" onSubmit={sendQuotation}>
+                    <div className="network-subheading"><h3>Create and share a quotation</h3><span>Visible to both businesses</span></div>
+                    <div className="quotation-form-grid">
+                      <label>Quotation title<input required maxLength={180} value={quoteTitle} onChange={e=>setQuoteTitle(e.target.value)} placeholder="e.g. Supply of products"/></label>
+                      <label>Currency<select value={quoteCurrency} onChange={e=>setQuoteCurrency(e.target.value)}><option value="ZAR">ZAR · South African rand</option><option value="USD">USD · US dollar</option><option value="EUR">EUR · Euro</option><option value="GBP">GBP · Pound sterling</option><option value="KES">KES · Kenyan shilling</option><option value="NGN">NGN · Nigerian naira</option></select></label>
+                      <label>Valid until<input type="date" value={quoteValidUntil} onChange={e=>setQuoteValidUntil(e.target.value)}/></label>
+                    </div>
+                    <div className="quotation-line-editor">{quoteLines.map((line,index)=><div className="quotation-line-row" key={index}>
+                      <input aria-label="Item description" required maxLength={240} placeholder="Item or service" value={line.description} onChange={e=>setQuoteLines(current=>current.map((item,i)=>i===index?{...item,description:e.target.value}:item))}/>
+                      <input aria-label="Quantity" required type="number" min="0.001" step="0.001" placeholder="Qty" value={line.quantity} onChange={e=>setQuoteLines(current=>current.map((item,i)=>i===index?{...item,quantity:e.target.value}:item))}/>
+                      <input aria-label="Unit price" required type="number" min="0" step="0.01" placeholder="Unit price" value={line.unit_price} onChange={e=>setQuoteLines(current=>current.map((item,i)=>i===index?{...item,unit_price:e.target.value}:item))}/>
+                      <input aria-label="Tax rate percent" required type="number" min="0" max="100" step="0.01" placeholder="Tax %" value={line.tax_rate} onChange={e=>setQuoteLines(current=>current.map((item,i)=>i===index?{...item,tax_rate:e.target.value}:item))}/>
+                      {quoteLines.length>1 && <button type="button" className="network-secondary-button" onClick={()=>setQuoteLines(current=>current.filter((_,i)=>i!==index))}>Remove</button>}
+                    </div>)}</div>
+                    <button type="button" className="network-secondary-button" onClick={()=>setQuoteLines(current=>[...current,{description:"",quantity:"1",unit_price:"",tax_rate:"15"}])}>+ Add line item</button>
+                    <label className="quotation-notes">Notes<textarea rows={2} maxLength={3000} value={quoteNotes} onChange={e=>setQuoteNotes(e.target.value)} placeholder="Payment terms, delivery details or conditions…"/></label>
+                    <button className="auth-submit quotation-submit" type="submit">Share quotation in Deal Room <ArrowUpRight size={15}/></button>
+                    <p className="quotation-disclaimer">A quotation response records the business's response in BusinessBrain. It is not a signed contract or legal acceptance of a binding agreement.</p>
+                  </form>
+                </div>
+
               </div>}
             </>}
           </div>
