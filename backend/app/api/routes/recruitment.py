@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.api.routes.auth import get_current_user
 from app.db import get_db
 from app.models import Business, JobApplication, JobPosting, Membership, User
-from app.schemas import ApplicationStatusUpdate, JobApplicationCreate, JobCreate, JobStatusUpdate
+from app.schemas import ApplicationStatusUpdate, JobApplicationCreate, JobCreate, JobStatusUpdate, PublicJobApplicationCreate
 
 router = APIRouter(prefix="/recruitment", tags=["people and recruitment"])
 
@@ -73,3 +73,48 @@ def update_application(application_id: str, payload: ApplicationStatusUpdate, cu
     if not app: raise HTTPException(status_code=404, detail="Applicant not found.")
     app.status = payload.status; db.commit(); db.refresh(app)
     return {"id": app.id, "status": app.status}
+
+
+@router.get("/public/jobs")
+def list_public_jobs(q: str | None = Query(default=None, max_length=120), db: Session = Depends(get_db)):
+    """Public vacancy board. Only published roles and non-sensitive company details are returned."""
+    statement = select(JobPosting, Business).join(Business, JobPosting.business_id == Business.id).where(JobPosting.status == "published")
+    if q:
+        term = q.strip().lower()
+        statement = statement.where(
+            (JobPosting.title.ilike(f"%{term}%")) |
+            (JobPosting.department.ilike(f"%{term}%")) |
+            (JobPosting.location.ilike(f"%{term}%")) |
+            (Business.name.ilike(f"%{term}%"))
+        )
+    rows = db.execute(statement.order_by(JobPosting.created_at.desc()).limit(100)).all()
+    return [{
+        "id": job.id, "title": job.title, "department": job.department, "location": job.location,
+        "employment_type": job.employment_type, "description": job.description,
+        "requirements": job.requirements, "created_at": job.created_at,
+        "business_name": business.name, "business_industry": business.industry,
+        "business_country": business.country,
+    } for job, business in rows]
+
+
+@router.post("/public/jobs/{job_id}/applications", status_code=status.HTTP_201_CREATED)
+def submit_public_application(job_id: str, payload: PublicJobApplicationCreate, db: Session = Depends(get_db)):
+    """Public candidate submission. Never returns or exposes existing applicant records."""
+    # Honeypot: bots filling the hidden field receive a generic accepted response.
+    if payload.website.strip():
+        return {"accepted": True, "message": "If eligible, your application has been received."}
+    job = db.scalar(select(JobPosting).where(JobPosting.id == job_id, JobPosting.status == "published"))
+    if not job:
+        raise HTTPException(status_code=404, detail="This vacancy is no longer accepting applications.")
+    email = str(payload.email).strip().lower()
+    duplicate = db.scalar(select(JobApplication.id).where(
+        JobApplication.job_id == job.id, JobApplication.email == email
+    ))
+    if duplicate:
+        raise HTTPException(status_code=409, detail="An application from this email address already exists for this vacancy.")
+    data = payload.model_dump(exclude={"consent_to_share", "website"})
+    data["email"] = email
+    application = JobApplication(job_id=job.id, **data)
+    db.add(application)
+    db.commit()
+    return {"accepted": True, "message": "Your application has been submitted successfully."}
