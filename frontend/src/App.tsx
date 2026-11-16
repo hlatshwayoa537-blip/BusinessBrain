@@ -93,6 +93,36 @@ export default function App() {
     }
   }
 
+  function updateProfileField(field: keyof BusinessProfile, value: string) {
+    setProfileDraft(current => ({ ...current, [field]: value }));
+  }
+
+  async function saveBusinessProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session) return;
+    setProfileBusy(true);
+    setProfileMessage("");
+    try {
+      const response = await fetch(API_BASE + "/auth/business/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
+        body: JSON.stringify(profileDraft),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "We couldn't save your business profile.");
+      const nextSession = { ...session, business: data };
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession));
+      setSession(nextSession);
+      setProfileDraft(data);
+      setProfileImage(data.profile_image_data_url ?? null);
+      setProfileMessage("Business profile saved.");
+    } catch (err) {
+      setProfileMessage(err instanceof Error ? err.message : "Unable to save your profile.");
+    } finally {
+      setProfileBusy(false);
+    }
+  }
+
   function signOut() {
     sessionStorage.removeItem(STORAGE_KEY);
     setSession(null);
