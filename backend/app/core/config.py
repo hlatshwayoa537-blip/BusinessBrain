@@ -11,6 +11,16 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://businessbrain:businessbrain@localhost:5432/businessbrain"
     jwt_secret_key: str = "development-only-change-me"
     access_token_expire_minutes: int = 30
+    s3_endpoint_url: str = ""
+    s3_region: str = "auto"
+    s3_bucket: str = ""
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+    s3_upload_url_expire_seconds: int = 300
+    s3_download_url_expire_seconds: int = 60
+    clamav_host: str = ""
+    clamav_port: int = 3310
+    clamav_timeout_seconds: int = 60
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
