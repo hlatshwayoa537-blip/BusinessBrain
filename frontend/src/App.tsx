@@ -76,6 +76,127 @@ export default function App() {
     return () => controller.abort();
   }, []);
 
+  async function networkRequest(path: string, method = "GET", body?: unknown) {
+    if (!session) throw new Error("Please sign in again.");
+    const response = await fetch(API_BASE + path, {
+      method, headers: { Authorization: "Bearer " + session.access_token, ...(body ? { "Content-Type": "application/json" } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "The Business Network request failed.");
+    return data;
+  }
+
+  async function refreshNetwork() {
+    if (!session) return;
+    try {
+      const [invites, chats] = await Promise.all([
+        networkRequest("/network/invitations?direction=incoming"),
+        networkRequest("/network/conversations"),
+      ]);
+      setIncomingInvitations(invites as NetworkInvitation[]);
+      setConversations(chats as NetworkConversation[]);
+    } catch (err) {
+      setNetworkActionMessage(err instanceof Error ? err.message : "Could not refresh conversations.");
+    }
+  }
+
+  useEffect(() => { if (session) void refreshNetwork(); }, [session?.access_token]);
+
+  useEffect(() => {
+    if (!session || !selectedConversation) { setConversationMessages([]); setDealRoomMessages([]); setDealRoom(null); return; }
+    let cancelled = false;
+    async function loadMessages() {
+      try {
+        const messages = await networkRequest("/network/conversations/" + selectedConversation!.id + "/messages");
+        if (!cancelled) setConversationMessages(messages as NetworkMessage[]);
+        if (selectedConversation!.deal_room_id) {
+          const room = { id: selectedConversation!.deal_room_id, conversation_id: selectedConversation!.id, status: selectedConversation!.deal_room_status ?? "discussion", created_at: "", updated_at: "" };
+          const dealMessages = await networkRequest("/network/deal-rooms/" + room.id + "/messages");
+          if (!cancelled) { setDealRoom(room); setDealRoomMessages(dealMessages as NetworkMessage[]); }
+        } else if (!cancelled) { setDealRoom(null); setDealRoomMessages([]); }
+      } catch (err) { if (!cancelled) setNetworkActionMessage(err instanceof Error ? err.message : "Could not load messages."); }
+    }
+    void loadMessages();
+    return () => { cancelled = true; };
+  }, [session?.access_token, selectedConversation?.id, selectedConversation?.deal_room_id]);
+
+  async function sendBusinessInvitation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!inviteTarget) return;
+    setNetworkActionBusy(true); setNetworkActionMessage("");
+    try {
+      await networkRequest("/network/invitations", "POST", { invited_business_id: inviteTarget.id, invitation_message: inviteMessage, access_password: invitePassword });
+      setNetworkActionMessage("Invitation sent. Share the password separately with the invited business contact.");
+      setInviteTarget(null); setInvitePassword(""); setInviteMessage(""); await refreshNetwork();
+    } catch (err) { setNetworkActionMessage(err instanceof Error ? err.message : "Could not send invitation."); }
+    finally { setNetworkActionBusy(false); }
+  }
+
+  async function acceptBusinessInvitation(invitationId: string) {
+    setNetworkActionBusy(true); setNetworkActionMessage("");
+    try {
+      const conversation = await networkRequest("/network/invitations/" + invitationId + "/accept", "POST", { access_password: acceptPassword }) as NetworkConversation;
+      setAcceptPassword(""); setSelectedConversation(conversation);
+      setNetworkActionMessage("Invitation accepted. Your private conversation is ready."); await refreshNetwork();
+    } catch (err) { setNetworkActionMessage(err instanceof Error ? err.message : "Could not accept invitation."); }
+    finally { setNetworkActionBusy(false); }
+  }
+
+  async function rejectBusinessInvitation(invitationId: string) {
+    setNetworkActionBusy(true); setNetworkActionMessage("");
+    try { await networkRequest("/network/invitations/" + invitationId + "/reject", "POST"); await refreshNetwork(); setNetworkActionMessage("Invitation declined."); }
+    catch (err) { setNetworkActionMessage(err instanceof Error ? err.message : "Could not decline invitation."); }
+    finally { setNetworkActionBusy(false); }
+  }
+
+  async function sendConversationMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedConversation || !conversationDraft.trim()) return;
+    try {
+      await networkRequest("/network/conversations/" + selectedConversation.id + "/messages", "POST", { body: conversationDraft });
+      setConversationDraft("");
+      const messages = await networkRequest("/network/conversations/" + selectedConversation.id + "/messages");
+      setConversationMessages(messages as NetworkMessage[]);
+    } catch (err) { setNetworkActionMessage(err instanceof Error ? err.message : "Message could not be sent."); }
+  }
+
+  async function openDealRoom() {
+    if (!selectedConversation) return;
+    try {
+      const room = await networkRequest("/network/conversations/" + selectedConversation.id + "/deal-room", "POST") as DealRoom;
+      setDealRoom(room);
+      const updated = { ...selectedConversation, deal_room_id: room.id, deal_room_status: room.status };
+      setSelectedConversation(updated);
+      setConversations(current => current.map(item => item.id === updated.id ? updated : item));
+      setDealRoomMessages([]);
+    } catch (err) { setNetworkActionMessage(err instanceof Error ? err.message : "Deal Room could not be opened."); }
+  }
+
+  async function sendDealRoomMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!dealRoom || !dealDraft.trim()) return;
+    try {
+      await networkRequest("/network/deal-rooms/" + dealRoom.id + "/messages", "POST", { body: dealDraft });
+      setDealDraft("");
+      const messages = await networkRequest("/network/deal-rooms/" + dealRoom.id + "/messages");
+      setDealRoomMessages(messages as NetworkMessage[]);
+    } catch (err) { setNetworkActionMessage(err instanceof Error ? err.message : "Deal Room message could not be sent."); }
+  }
+
+  async function updateDealStatus(status: string) {
+    if (!dealRoom) return;
+    try {
+      const updated = await networkRequest("/network/deal-rooms/" + dealRoom.id, "PATCH", { status }) as DealRoom;
+      setDealRoom(updated);
+      if (selectedConversation) {
+        const next = { ...selectedConversation, deal_room_status: updated.status };
+        setSelectedConversation(next);
+        setConversations(current => current.map(item => item.id === next.id ? next : item));
+      }
+    } catch (err) { setNetworkActionMessage(err instanceof Error ? err.message : "Deal status could not be updated."); }
+  }
+
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
