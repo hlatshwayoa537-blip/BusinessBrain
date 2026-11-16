@@ -496,6 +496,14 @@ export default function App() {
     setMode("login");
   }
 
+  async function acceptStaffInvite(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setStaffAcceptBusy(true); setStaffAcceptMessage("");
+    try { const response = await fetch(API_BASE + "/staff/accept", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: staffInviteToken, full_name: staffAcceptName, password: staffAcceptPassword }) }); const data = await response.json(); if (!response.ok) throw new Error(data.detail || "Invitation could not be accepted."); setStaffAcceptMessage("Your account is ready. You can now sign in with your invited email address and password."); window.history.replaceState({}, "", "/"); setMode("login"); }
+    catch (err) { setStaffAcceptMessage(err instanceof Error ? err.message : "Invitation could not be accepted."); } finally { setStaffAcceptBusy(false); }
+  }
+
+  if (!session && staffInviteToken) return <div className="auth-page"><div className="auth-brand"><div className="brand-mark"><Activity size={22}/></div><span>Business<span className="brand-accent">Brain</span></span></div><section className="auth-card"><div className="auth-card-heading"><h2>Join your business team</h2><p>Complete your staff account using your invitation.</p></div><form className="auth-form" onSubmit={acceptStaffInvite}><label>Your full name<input required minLength={2} maxLength={160} value={staffAcceptName} onChange={e=>setStaffAcceptName(e.target.value)} /></label><label>Create password<input required type="password" minLength={12} maxLength={128} value={staffAcceptPassword} onChange={e=>setStaffAcceptPassword(e.target.value)} placeholder="At least 12 characters"/></label>{staffAcceptMessage && <div className="auth-warning" role="status">{staffAcceptMessage}</div>}<button className="auth-submit" type="submit" disabled={staffAcceptBusy}>{staffAcceptBusy ? "Joining team…" : "Accept invitation"} <ArrowUpRight size={16}/></button></form><div className="auth-footnote"><LockKeyhole size={14}/> This invitation link is private and expires after 48 hours.</div></section></div>;
+
   if (window.location.pathname === "/careers" || window.location.pathname === "/jobs") return <PublicCareers />;
 
   if (!session) return <div className="auth-page">
