@@ -226,7 +226,10 @@ export default function App() {
       const upload = await networkRequest("/network/deal-rooms/" + dealRoom.id + "/files/upload-url", "POST", {
         filename: selectedDealFile.name, content_type: selectedDealFile.type, size_bytes: selectedDealFile.size
       });
-      const sent = await fetch(upload.upload_url, { method: "PUT", headers: upload.headers, body: selectedDealFile });
+      const uploadForm = new FormData();
+      Object.entries(upload.fields as Record<string, string>).forEach(([key, value]) => uploadForm.append(key, value));
+      uploadForm.append("file", selectedDealFile);
+      const sent = await fetch(upload.upload_url, { method: "POST", body: uploadForm });
       if (!sent.ok) throw new Error("The private storage upload failed. Please try again.");
       setFileMessage("Upload received. Running malware scan…");
       const completed = await networkRequest("/network/files/" + upload.file_id + "/complete", "POST") as DealFile;
