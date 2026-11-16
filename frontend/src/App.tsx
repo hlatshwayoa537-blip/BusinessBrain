@@ -4,7 +4,8 @@ import { Activity, ArrowUpRight, Bot, BriefcaseBusiness, Building2, ChartNoAxesC
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
 type ApiStatus = "checking" | "online" | "offline";
-type BusinessProfile = { name: string; industry: string; country: string; profile_image_data_url?: string | null; registration_number?: string | null; website?: string | null; contact_email?: string | null; phone?: string | null; address_line?: string | null; city?: string | null; province?: string | null; postal_code?: string | null; description?: string | null };
+type BusinessProfile = { name: string; industry: string; country: string; profile_image_data_url?: string | null; registration_number?: string | null; website?: string | null; contact_email?: string | null; phone?: string | null; address_line?: string | null; city?: string | null; province?: string | null; postal_code?: string | null; description?: string | null; directory_listed?: boolean; public_email?: boolean; public_phone?: boolean; public_website?: boolean; public_location?: boolean };
+type PublicBusiness = { id: string; name: string; industry: string; country: string; profile_image_data_url?: string | null; website?: string | null; contact_email?: string | null; phone?: string | null; city?: string | null; province?: string | null; description?: string | null };
 type AuthData = { access_token: string; user: { id: string; email: string; full_name: string }; business: BusinessProfile & { id: string } };
 const STORAGE_KEY = "businessbrain.session";
 const modules = [
@@ -44,9 +45,16 @@ export default function App() {
     address_line: session?.business.address_line ?? "", city: session?.business.city ?? "",
     province: session?.business.province ?? "", postal_code: session?.business.postal_code ?? "",
     description: session?.business.description ?? "", profile_image_data_url: session?.business.profile_image_data_url ?? null,
+    directory_listed: session?.business.directory_listed ?? false, public_email: session?.business.public_email ?? false,
+    public_phone: session?.business.public_phone ?? false, public_website: session?.business.public_website ?? false,
+    public_location: session?.business.public_location ?? false,
   }));
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileMessage, setProfileMessage] = useState("");
+  const [directoryResults, setDirectoryResults] = useState<PublicBusiness[]>([]);
+  const [directoryQuery, setDirectoryQuery] = useState("");
+  const [directoryBusy, setDirectoryBusy] = useState(false);
+  const [directoryMessage, setDirectoryMessage] = useState("");
 
   function handleProfileImage(file?: File) {
     setImageError("");
@@ -92,6 +100,9 @@ export default function App() {
         address_line: data.business.address_line ?? "", city: data.business.city ?? "",
         province: data.business.province ?? "", postal_code: data.business.postal_code ?? "",
         description: data.business.description ?? "", profile_image_data_url: data.business.profile_image_data_url ?? null,
+        directory_listed: data.business.directory_listed ?? false, public_email: data.business.public_email ?? false,
+        public_phone: data.business.public_phone ?? false, public_website: data.business.public_website ?? false,
+        public_location: data.business.public_location ?? false,
       });
       setProfileImage(data.business.profile_image_data_url ?? null);
       setPassword("");
