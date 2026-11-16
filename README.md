@@ -110,3 +110,22 @@ Routes (under `/api/v1`): `POST /network/deal-rooms/{room_id}/quotations`, `GET 
 Migration `0006_deal_room_quotations` follows migration 0005. Run `alembic upgrade head` before using quotations in a deployed environment.
 
 Binary document uploads are not enabled yet. They require private object storage, short-lived signed upload/download URLs, file validation and malware scanning; no public file URLs or local ephemeral Render disk are used as a shortcut.
+
+
+## Private Deal Room document sharing
+
+Participants can upload PDF, DOCX, XLSX, PPTX, TXT, CSV, PNG and JPG/JPEG files up to 25 MB. The API issues short-lived presigned PUT URLs to a **private S3-compatible bucket**. Uploads first land under a quarantine key and are not listed or downloadable. The completion endpoint verifies the stored byte count and content type, streams the object to a configured ClamAV daemon, and only promotes a clean file to its private final key. Malware detections are rejected and the quarantined object is deleted. Scanner outages fail closed: the upload remains pending in quarantine and no download URL is issued.
+
+Only authenticated members of either business in the active Deal Room can list or download clean files. Download links are short-lived (60 seconds by default). Only the business that uploaded a file can delete it. File bytes are stored outside the application database; the database stores access-controlled metadata only.
+
+### Required deployment configuration
+
+Set these backend environment variables before enabling uploads:
+
+- `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`; set `S3_ENDPOINT_URL` for providers such as Cloudflare R2 or another S3-compatible service.
+- `CLAMAV_HOST`, `CLAMAV_PORT` and optionally `CLAMAV_TIMEOUT_SECONDS` for a reachable ClamAV daemon.
+- Optionally tune `S3_UPLOAD_URL_EXPIRE_SECONDS` and `S3_DOWNLOAD_URL_EXPIRE_SECONDS`.
+
+The bucket must remain private, have public access blocked, and have lifecycle cleanup configured for abandoned `quarantine/` objects. Configure bucket CORS to allow the exact frontend origins and browser `PUT` requests with the `Content-Type` header. Do not expose bucket credentials to the frontend. Deploy and monitor ClamAV separately; if it is unavailable, BusinessBrain deliberately refuses to release files.
+
+Migration `0007_deal_room_files` follows migration 0006. Apply `alembic upgrade head` before use. Storage and ClamAV credentials are not configured by this code change; document upload remains unavailable until the deployment environment and private bucket CORS are configured.
