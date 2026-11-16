@@ -20,7 +20,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthRes
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(status_code=409, detail="An account with this email already exists.")
     user = User(email=email, full_name=payload.full_name.strip(), password_hash=hash_password(payload.password))
-    business = Business(name=payload.business_name.strip(), industry=payload.industry.strip(), country=payload.country.upper())
+    business = Business(name=payload.business_name.strip(), industry=payload.industry.strip(), country=payload.country.upper(), profile_image_data_url=payload.profile_image_data_url)
     db.add_all([user, business])
     db.flush()
     db.add(Membership(user_id=user.id, business_id=business.id, role="owner"))
