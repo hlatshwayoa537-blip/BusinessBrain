@@ -171,3 +171,28 @@ class DealRoomMessageResponse(BaseModel):
     sender_user_name: str
     body: str
     created_at: object
+
+
+class JobCreate(BaseModel):
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=180)]
+    department: str | None = Field(default=None, max_length=120)
+    location: str | None = Field(default=None, max_length=180)
+    employment_type: Annotated[str, StringConstraints(pattern=r"^(full_time|part_time|contract|internship|temporary)$")] = "full_time"
+    description: Annotated[str, StringConstraints(strip_whitespace=True, min_length=30, max_length=12000)]
+    requirements: str | None = Field(default=None, max_length=8000)
+    status: Annotated[str, StringConstraints(pattern=r"^(draft|published|closed)$")] = "draft"
+
+class JobApplicationCreate(BaseModel):
+    applicant_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=160)]
+    email: EmailStr
+    phone: str | None = Field(default=None, max_length=40)
+    location: str | None = Field(default=None, max_length=180)
+    experience: str | None = Field(default=None, max_length=80)
+    resume_url: str | None = Field(default=None, max_length=500)
+    cover_letter: str | None = Field(default=None, max_length=5000)
+
+class JobStatusUpdate(BaseModel):
+    status: Annotated[str, StringConstraints(pattern=r"^(draft|published|closed)$")]
+
+class ApplicationStatusUpdate(BaseModel):
+    status: Annotated[str, StringConstraints(pattern=r"^(new|reviewing|shortlisted|interview|rejected|hired)$")]
