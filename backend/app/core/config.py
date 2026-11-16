@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     clamav_host: str = ""
     clamav_port: int = 3310
     clamav_timeout_seconds: int = 60
+    frontend_base_url: str = "http://localhost:5173"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_use_tls: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
