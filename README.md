@@ -99,3 +99,14 @@ Key API routes (under `/api/v1`):
 Migration `0005_business_conversations_deal_rooms` creates the invitation, conversation, message and Deal Room tables. Apply migrations with `alembic upgrade head` before using these routes in a deployed environment.
 
 This initial release provides authenticated request/response messaging, not real-time push notifications, file attachments, video calls, contract e-signatures or legal deal execution. Any binding commercial agreement still requires authorised human review and approval.
+
+
+## Deal Room quotations
+
+Deal Room participants can create and share structured quotations with up to 50 line items, currency, per-line tax rates, notes and an optional validity date. The API calculates subtotal, tax and total server-side using decimal arithmetic. Both participating businesses can view quotations; only the receiving business can accept or decline, and only the issuing business can withdraw an unanswered quotation. Quotation responses are workflow records and do not constitute a signed contract or legal acceptance of binding terms.
+
+Routes (under `/api/v1`): `POST /network/deal-rooms/{room_id}/quotations`, `GET /network/deal-rooms/{room_id}/quotations`, `POST /network/quotations/{quotation_id}/decision`, and `POST /network/quotations/{quotation_id}/withdraw`.
+
+Migration `0006_deal_room_quotations` follows migration 0005. Run `alembic upgrade head` before using quotations in a deployed environment.
+
+Binary document uploads are not enabled yet. They require private object storage, short-lived signed upload/download URLs, file validation and malware scanning; no public file URLs or local ephemeral Render disk are used as a shortcut.
