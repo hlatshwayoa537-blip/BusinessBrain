@@ -196,3 +196,22 @@ class JobStatusUpdate(BaseModel):
 
 class ApplicationStatusUpdate(BaseModel):
     status: Annotated[str, StringConstraints(pattern=r"^(new|reviewing|shortlisted|interview|rejected|hired)$")]
+
+
+class PublicJobApplicationCreate(JobApplicationCreate):
+    consent_to_share: bool
+    website: str = Field(default="", max_length=200)
+
+    @field_validator("consent_to_share")
+    @classmethod
+    def require_consent(cls, value: bool) -> bool:
+        if not value:
+            raise ValueError("Please consent to sharing your application with the hiring business.")
+        return value
+
+    @field_validator("resume_url")
+    @classmethod
+    def validate_resume_url(cls, value: str | None) -> str | None:
+        if value and not value.startswith("https://"):
+            raise ValueError("CV links must use a secure https:// address.")
+        return value
