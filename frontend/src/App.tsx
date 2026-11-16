@@ -143,6 +143,28 @@ export default function App() {
     }
   }
 
+  async function searchBusinessDirectory(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    if (!session) return;
+    setDirectoryBusy(true);
+    setDirectoryMessage("");
+    try {
+      const params = new URLSearchParams();
+      if (directoryQuery.trim()) params.set("q", directoryQuery.trim());
+      const response = await fetch(API_BASE + "/network/businesses?" + params.toString(), {
+        headers: { Authorization: "Bearer " + session.access_token },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Unable to load the Business Network.");
+      setDirectoryResults(data as PublicBusiness[]);
+      if (!data.length) setDirectoryMessage("No listed businesses found yet. Try another search or invite a business to join.");
+    } catch (err) {
+      setDirectoryMessage(err instanceof Error ? err.message : "Unable to load the directory.");
+    } finally {
+      setDirectoryBusy(false);
+    }
+  }
+
   function signOut() {
     sessionStorage.removeItem(STORAGE_KEY);
     setSession(null);
