@@ -169,6 +169,17 @@ export default function App() {
   const [jobRequirements, setJobRequirements] = useState("");
   const [recruitmentBusy, setRecruitmentBusy] = useState(false);
   const [recruitmentMessage, setRecruitmentMessage] = useState("");
+  const [staff, setStaff] = useState<any[]>([]);
+  const [staffInvitations, setStaffInvitations] = useState<any[]>([]);
+  const [staffEmail, setStaffEmail] = useState("");
+  const [staffRole, setStaffRole] = useState("employee");
+  const [staffMessage, setStaffMessage] = useState("");
+  const [staffBusy, setStaffBusy] = useState(false);
+  async function refreshStaff() { if (!session) return; try { const [members, invites] = await Promise.all([networkRequest("/staff"), networkRequest("/staff/invitations")]); setStaff(members); setStaffInvitations(invites); } catch (err) { setStaffMessage(err instanceof Error ? err.message : "Could not load staff."); } }
+  useEffect(() => { if (session) void refreshStaff(); }, [session?.access_token]);
+  async function inviteStaff(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setStaffBusy(true); setStaffMessage(""); try { const result = await networkRequest("/staff/invitations", "POST", { email: staffEmail, role: staffRole }); setStaffEmail(""); setStaffMessage(result.email_sent ? "Invitation email sent. The link expires in 48 hours." : result.message); await refreshStaff(); } catch (err) { setStaffMessage(err instanceof Error ? err.message : "Invitation could not be sent."); } finally { setStaffBusy(false); } }
+  async function changeStaffRole(id: string, role: string) { try { await networkRequest("/staff/" + id, "PATCH", { role }); await refreshStaff(); } catch (err) { setStaffMessage(err instanceof Error ? err.message : "Role could not be changed."); } }
+  async function removeStaff(id: string) { if (!window.confirm("Remove this staff member access to the business?")) return; try { await networkRequest("/staff/" + id, "DELETE"); await refreshStaff(); } catch (err) { setStaffMessage(err instanceof Error ? err.message : "Staff member could not be removed."); } }
   const [applicantFilter, setApplicantFilter] = useState("all");
 
 
@@ -519,7 +530,7 @@ export default function App() {
       <a className="brand" href="/" aria-label="BusinessBrain home"><div className="brand-mark"><Activity size={22}/></div><span>Business<span className="brand-accent">Brain</span></span></a>
       <div className="workspace-label">WORKSPACE</div>
       <div className="workspace-switch"><span className="workspace-icon">{session.business.profile_image_data_url ? <img src={session.business.profile_image_data_url} alt="Business profile"/> : <Building2 size={17}/>}</span><span><strong>{session.business.name}</strong><small>{session.business.industry}</small></span><ChevronRight size={16}/></div>
-      <nav className="navigation" aria-label="Main navigation"><a className="nav-item active" href="#overview"><LayoutDashboard size={18}/>Overview</a><a className="nav-item" href="#finance"><CreditCard size={18}/>Finance</a><a className="nav-item" href="#customers"><Users size={18}/>Customers</a><a className="nav-item" href="#operations"><Package size={18}/>Operations</a><a className="nav-item" href="#people"><BriefcaseBusiness size={18}/>People & HR</a><a className="nav-item" href="#business-profile"><Building2 size={18}/>Business Profile</a><a className="nav-item" href="#network"><Building2 size={18}/>Business Network</a><a className="nav-item" href="#private-conversations"><LockKeyhole size={18}/>Private Conversations</a></nav>
+      <nav className="navigation" aria-label="Main navigation"><a className="nav-item active" href="#overview"><LayoutDashboard size={18}/>Overview</a><a className="nav-item" href="#finance"><CreditCard size={18}/>Finance</a><a className="nav-item" href="#customers"><Users size={18}/>Customers</a><a className="nav-item" href="#operations"><Package size={18}/>Operations</a><a className="nav-item" href="#team"><Users size={18}/>Team Management</a><a className="nav-item" href="#people"><BriefcaseBusiness size={18}/>People & HR</a><a className="nav-item" href="#business-profile"><Building2 size={18}/>Business Profile</a><a className="nav-item" href="#network"><Building2 size={18}/>Business Network</a><a className="nav-item" href="#private-conversations"><LockKeyhole size={18}/>Private Conversations</a></nav>
       <div className="sidebar-bottom"><a className="nav-item" href="#settings"><Settings2 size={18}/>Settings</a><a className="nav-item" href="#help"><CircleHelp size={18}/>Help & support</a><button className="nav-item signout-button" onClick={signOut}><LogOut size={18}/>Sign out</button><div className="security-note"><ShieldCheck size={17}/><span>Designed with business data security at its core.</span></div></div>
     </aside>
     <main className="main-content" id="overview">
@@ -557,6 +568,18 @@ export default function App() {
         </form>
       </section>
 
+      <section className="profile-centre" id="team">
+        <div className="profile-centre-heading"><div><div className="eyebrow">TEAM MANAGEMENT</div><h2>Build your business team.</h2><p>Invite staff with individual accounts and control their workspace roles.</p></div><span className="profile-status">Owner controlled</span></div>
+        {staffMessage && <p className="recruitment-message" role="status">{staffMessage}</p>}
+        <form className="business-profile-form" onSubmit={inviteStaff}><div className="profile-fields-grid">
+          <label>Staff email address<input type="email" required value={staffEmail} onChange={e=>setStaffEmail(e.target.value)} placeholder="colleague@company.co.za"/></label>
+          <label>Access role<select value={staffRole} onChange={e=>setStaffRole(e.target.value)}><option value="employee">Employee</option><option value="manager">Manager</option><option value="hr">HR</option><option value="admin">Administrator</option></select></label>
+        </div><div className="profile-form-footer"><button className="auth-submit profile-save" type="submit" disabled={staffBusy}>{staffBusy ? "Sending invitation…" : "Invite staff member"} <ArrowUpRight size={16}/></button></div></form>
+        <div className="network-subheading"><h3>Current team</h3><button type="button" onClick={()=>void refreshStaff()}>Refresh</button></div>
+        <div className="applicant-grid">{staff.map(member=><article className="applicant-card" key={member.id}><div className="applicant-card-head"><div className="applicant-avatar">{member.full_name.split(" ").map((part:string)=>part[0]).slice(0,2).join("").toUpperCase()}</div><div className="applicant-identity"><h4>{member.full_name}</h4><span>{member.email}</span></div><span className="applicant-status">{member.role}</span></div><div className="applicant-card-footer">{member.role!=="owner" && <><select aria-label={"Role for "+member.full_name} value={member.role} onChange={e=>changeStaffRole(member.id,e.target.value)}><option value="employee">Employee</option><option value="manager">Manager</option><option value="hr">HR</option><option value="admin">Administrator</option></select><button type="button" className="network-secondary-button" onClick={()=>removeStaff(member.id)}>Remove access</button></>}</div></article>)}</div>
+        <div className="network-subheading"><h3>Pending invitations</h3><span>{staffInvitations.filter(item=>item.status==="pending").length} pending</span></div>
+        <div className="directory-grid">{staffInvitations.filter(item=>item.status==="pending").map(item=><article className="directory-card" key={item.id}><h3>{item.email}</h3><p>{item.role} · Expires {new Date(item.expires_at).toLocaleString()}</p><span className="profile-status">Invitation pending</span></article>)}</div>
+      </section>
       <section className="recruitment-centre" id="people">
         <div className="profile-centre-heading"><div><div className="eyebrow">PEOPLE & RECRUITMENT</div><h2>Find the people who move business forward.</h2><p>Publish vacancies, review applicants and manage each candidate through a clear hiring pipeline.</p></div><span className="profile-status">Private to your business</span></div>
         {recruitmentMessage && <p className="recruitment-message" role="status">{recruitmentMessage}</p>}
