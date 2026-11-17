@@ -231,7 +231,7 @@ function DailyCloseWorkspace({session}:{session:AuthData}) {
     try {
       const data=await request("/daily-closes","POST",{
         business_date:businessDate,branch_name:branch,timezone_name:Intl.DateTimeFormat().resolvedOptions().timeZone||"Africa/Johannesburg",
-        expected_cash:expectedCash,expected_card:expectedCard,expected_other:expectedOther,
+        expected_cash:expectedCash===""?null:expectedCash,expected_card:expectedCard===""?null:expectedCard,expected_other:expectedOther===""?null:expectedOther,
         actual_cash:actualCash,actual_card:actualCard,actual_other:actualOther,expenses_total:expenses,notes:notes||null
       }) as DailyCloseRow;
       setSelected(data);setMessage(data.source_type==="pos"?"Saved. Expected totals were calculated from matching POS transactions.":"Saved as a manual close because no matching POS transactions were found.");
@@ -268,9 +268,9 @@ function DailyCloseWorkspace({session}:{session:AuthData}) {
         <label>Branch / store<input required maxLength={160} value={branch} onChange={e=>setBranch(e.target.value)} /></label>
         <p className="finance-disclaimer">Expected totals are taken from matching POS transactions when available. Otherwise enter the expected figures from your till/Z report. Actual figures must be counted or confirmed by staff.</p>
         <div className="profile-fields-grid">
-          <label>Expected cash (R)<input type="number" min="0" step="0.01" required value={expectedCash} onChange={e=>setExpectedCash(e.target.value)} placeholder="0.00"/></label>
-          <label>Expected card (R)<input type="number" min="0" step="0.01" required value={expectedCard} onChange={e=>setExpectedCard(e.target.value)} placeholder="0.00"/></label>
-          <label>Expected other (R)<input type="number" min="0" step="0.01" required value={expectedOther} onChange={e=>setExpectedOther(e.target.value)}/></label>
+          <label>Expected cash (R)<input type="number" min="0" step="0.01" value={expectedCash} onChange={e=>setExpectedCash(e.target.value)} placeholder="0.00"/></label>
+          <label>Expected card (R)<input type="number" min="0" step="0.01" value={expectedCard} onChange={e=>setExpectedCard(e.target.value)} placeholder="0.00"/></label>
+          <label>Expected other (R)<input type="number" min="0" step="0.01" value={expectedOther} onChange={e=>setExpectedOther(e.target.value)}/></label>
           <label>Cash counted (R)<input type="number" min="0" step="0.01" required value={actualCash} onChange={e=>setActualCash(e.target.value)} placeholder="0.00"/></label>
           <label>Card settled / confirmed (R)<input type="number" min="0" step="0.01" required value={actualCard} onChange={e=>setActualCard(e.target.value)} placeholder="0.00"/></label>
           <label>Other received (R)<input type="number" min="0" step="0.01" required value={actualOther} onChange={e=>setActualOther(e.target.value)}/></label>
