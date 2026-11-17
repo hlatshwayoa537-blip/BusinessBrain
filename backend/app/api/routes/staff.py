@@ -1,18 +1,10 @@
 import hashlib
-import json
-import logging
-import os
 import secrets
-import smtplib
-import urllib.error
-import urllib.request
-from datetime import datetime, timedelta, timezone
-from email.message import EmailMessage
+from datetime import timedelta
 from uuid import uuid4
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -23,13 +15,8 @@ from app.models import Business, Membership, User
 from app.security import hash_password, verify_password
 from app.models import utc_now
 
-logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/staff", tags=["staff management"])
 
-class EmailDeliveryError(RuntimeError):
-    def __init__(self, code: str):
-        self.code = code
-        super().__init__(code)
 ALLOWED_ROLES = {"admin", "manager", "employee", "hr"}
 
 class StaffInviteCreate(BaseModel):
@@ -38,7 +25,6 @@ class StaffInviteCreate(BaseModel):
 
 class StaffAccept(BaseModel):
     token: str = Field(min_length=32, max_length=256)
-    email: EmailStr
     full_name: str = Field(min_length=2, max_length=160)
     password: str = Field(min_length=12, max_length=128)
 
@@ -173,7 +159,7 @@ def send_invite_email(email: str, business_name: str, invite_url: str):
 def list_staff(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     membership = get_membership(current_user, db)
     rows = db.execute(select(Membership, User).join(User, User.id == Membership.user_id).where(Membership.business_id == membership.business_id).order_by(Membership.created_at)).all()
-    return [{"id": m.id, "user_id": u.id, "full_name": u.full_name, "email": u.email, "phone": u.phone, "role": m.role, "active": u.is_active, "joined_at": m.created_at} for m, u in rows]
+    return [{"id": m.id, "user_id": u.id, "full_name": u.full_name, "phone": u.phone, "role": m.role, "active": u.is_active, "joined_at": m.created_at} for m, u in rows]
 
 @router.get("/invitations")
 def list_invitations(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -218,28 +204,35 @@ def accept_invitation(payload: StaffAccept, db: Session = Depends(get_db)):
     invite = db.scalar(select(StaffInvitation).where(StaffInvitation.token_hash == token_hash, StaffInvitation.status == "pending"))
     if not invite or invite.expires_at <= utc_now():
         raise HTTPException(status_code=400, detail="This invitation is invalid, expired or already used.")
-    email = str(payload.email).lower().strip()
-    if invite.email and invite.email.lower() != email:
-        raise HTTPException(status_code=403, detail="Use the email address that received this invitation.")
-    user = db.scalar(select(User).where(User.email == email))
+    phone = "".join(ch for ch in (invite.phone or "") if ch.isdigit())
+    if len(phone) < 8:
+        raise HTTPException(status_code=400, detail="This invitation does not contain a valid WhatsApp number.")
+    candidates = db.scalars(select(User).where(User.phone.is_not(None))).all()
+    matches = [candidate for candidate in candidates if "".join(ch for ch in (candidate.phone or "") if ch.isdigit()) == phone]
+    if len(matches) > 1:
+        raise HTTPException(status_code=409, detail="This WhatsApp number is linked to multiple accounts. Contact the business owner.")
+    user = matches[0] if matches else None
     if user:
         if not verify_password(payload.password, user.password_hash):
-            raise HTTPException(status_code=403, detail="This email already has a BusinessBrain account. Enter that account password to accept the invitation.")
+            raise HTTPException(status_code=403, detail="A BusinessBrain account already uses this WhatsApp number. Enter that account password to accept the invitation.")
         if db.scalar(select(Membership).where(Membership.user_id == user.id, Membership.business_id == invite.business_id)):
             raise HTTPException(status_code=409, detail="This account already belongs to the business.")
         if not user.is_active:
             raise HTTPException(status_code=403, detail="This account is disabled. Contact the business owner.")
     else:
-        user = User(email=email, full_name=payload.full_name.strip(), password_hash=hash_password(payload.password), phone=invite.phone)
+        # The database currently requires a unique email. This private, non-deliverable
+        # alias preserves that constraint without asking staff for or sending email.
+        account_alias = f"staff+{phone}@accounts.businessbrain.invalid"
+        user = User(email=account_alias, full_name=payload.full_name.strip(), password_hash=hash_password(payload.password), phone=phone)
         db.add(user)
         db.flush()
     if not user.phone:
-        user.phone = invite.phone
+        user.phone = phone
     db.add(Membership(user_id=user.id, business_id=invite.business_id, role=invite.role))
     invite.status = "accepted"
     invite.accepted_at = utc_now()
     db.commit()
-    return {"accepted": True, "email": user.email, "message": "Your account has joined the business."}
+    return {"accepted": True, "phone": phone, "message": "Your account has joined the business."}
 
 @router.patch("/{membership_id}")
 def update_staff_role(membership_id: str, payload: StaffRoleUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
