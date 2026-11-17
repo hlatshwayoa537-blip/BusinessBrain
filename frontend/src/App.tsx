@@ -256,10 +256,12 @@ function POSConnectionsWorkspace({session}:{session:AuthData}) {
 
 
 type SalesDailyRow = {date:string;sales:string;refunds:string;net_sales:string;transaction_count:number;void_count:number};
-type SalesBranchRow = {branch:string;sales:string;refunds:string;net_sales:string;transaction_count:number;void_count:number};\ntype SalesTillRow = {branch:string;till:string;net_sales:string;transaction_count:number};
+type SalesBranchRow = {branch:string;sales:string;refunds:string;net_sales:string;transaction_count:number;void_count:number};
+type SalesTillRow = {branch:string;till:string;net_sales:string;transaction_count:number};
 function SalesIntelligenceWorkspace({session}:{session:AuthData}) {
   const [daily,setDaily]=useState<SalesDailyRow[]>([]);
-  const [branches,setBranches]=useState<SalesBranchRow[]>([]);\n  const [tills,setTills]=useState<SalesTillRow[]>([]);
+  const [branches,setBranches]=useState<SalesBranchRow[]>([]);
+  const [tills,setTills]=useState<SalesTillRow[]>([]);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState("");
   async function load(){
