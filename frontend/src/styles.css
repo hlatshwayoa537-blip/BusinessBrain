@@ -193,3 +193,30 @@
 .daily-close-detail textarea{width:100%;min-height:76px}
 .daily-close-detail .pos-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
 @media(max-width:760px){.finance-record-row{align-items:flex-start;flex-direction:column}.finance-record-row>span:last-child{text-align:left}}
+
+
+.billing-workspace{margin:28px 0;padding:26px;border:1px solid #20384b;border-radius:16px;background:linear-gradient(145deg,#0d1d2c,#0a1724)}
+.billing-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:22px 0}
+.billing-stats article{padding:18px;border:1px solid #263e50;border-radius:12px;background:#102235;min-width:0}
+.billing-stats article span,.billing-stats article small{display:block;color:#8fa5b7;font-size:12px}
+.billing-stats article strong{display:block;margin:10px 0 5px;color:#f1f7fb;font:700 25px Manrope,sans-serif;overflow-wrap:anywhere}
+.billing-price-note,.billing-payment-note{display:flex;flex-direction:column;gap:7px;padding:16px 18px;border:1px solid #234b51;border-radius:11px;background:#0d292e;color:#c4d9dc;font-size:13px;line-height:1.6;margin:16px 0}
+.billing-price-note strong,.billing-payment-note strong{color:#54d8c2;font-size:14px}
+.billing-columns{display:grid;grid-template-columns:minmax(260px,.85fr) minmax(0,1.15fr);gap:18px;margin-top:18px}
+.billing-columns .finance-form,.billing-terminal-list{min-width:0}
+.billing-terminal-list{padding:20px;border:1px solid #263e50;border-radius:12px;background:#0e1d2b}
+.billing-terminal{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 0;border-bottom:1px solid #23384a}
+.billing-terminal:last-child{border-bottom:0}
+.billing-terminal>div:first-child{min-width:0}
+.billing-terminal strong,.billing-terminal span{display:block}
+.billing-terminal strong{font-size:13px;color:#e8f0f7}
+.billing-terminal>div:first-child span{font-size:11px;color:#849bad;margin-top:5px;overflow-wrap:anywhere}
+.billing-terminal-actions{display:flex;align-items:center;gap:9px;flex-shrink:0}
+.billing-terminal-status{font-size:10px;text-transform:capitalize;border-radius:20px;padding:5px 9px;background:#203b3b;color:#65d9bd}
+.billing-terminal-status.inactive{background:#382d2d;color:#e3a6a6}
+.billing-payment-note{background:#171f2a;border-color:#3a4552;color:#aebdca}
+.billing-payment-note strong{color:#e8c88a}
+.billing-payment-note p{margin:0}
+.billing-payment-note span{font-size:12px;color:#8fa1b1}
+@media(max-width:900px){.billing-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.billing-columns{grid-template-columns:1fr}}
+@media(max-width:520px){.billing-workspace{padding:17px}.billing-stats article strong{font-size:21px}.billing-terminal{align-items:flex-start;flex-direction:column}.billing-terminal-actions{width:100%;justify-content:space-between}}
