@@ -18,6 +18,10 @@ def current_membership(user: User, db: Session) -> Membership:
         raise HTTPException(status_code=403, detail="A business workspace is required.")
     return membership
 
+def require_finance_reader(membership: Membership) -> None:
+    if membership.role not in {"owner", "admin", "manager"}:
+        raise HTTPException(status_code=403, detail="You do not have permission to view this business's financial records.")
+
 def require_finance_admin(membership: Membership) -> None:
     if membership.role not in {"owner", "admin"}:
         raise HTTPException(status_code=403, detail="Only business owners or administrators can add or delete financial records.")
@@ -30,6 +34,7 @@ def list_transactions(
     user: User = Depends(get_current_user),
 ):
     membership = current_membership(user, db)
+    require_finance_reader(membership)
     statement = select(FinanceTransaction).where(FinanceTransaction.business_id == membership.business_id)
     if kind:
         statement = statement.where(FinanceTransaction.kind == kind)
@@ -89,6 +94,7 @@ def finance_summary(
     user: User = Depends(get_current_user),
 ):
     membership = current_membership(user, db)
+    require_finance_reader(membership)
     selected_year = year or date.today().year
     records = list(db.scalars(select(FinanceTransaction).where(
         FinanceTransaction.business_id == membership.business_id,
