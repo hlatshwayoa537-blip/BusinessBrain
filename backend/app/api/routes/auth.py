@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.db import get_db
-from app.models import Business, Membership, User
+from app.models import Business, BusinessReferral, BusinessReferralProfile, Membership, User
 from app.schemas import AuthResponse, BusinessProfileUpdate, BusinessResponse, LoginRequest, RegisterRequest, UserResponse
 from app.security import create_access_token, decode_access_token, hash_password, verify_password
 
@@ -20,10 +20,18 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthRes
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(status_code=409, detail="An account with this email already exists.")
     user = User(email=email, full_name=payload.full_name.strip(), password_hash=hash_password(payload.password))
+    referrer_profile = None
+    if payload.referral_code:
+        code = payload.referral_code.strip().upper()
+        referrer_profile = db.scalar(select(BusinessReferralProfile).where(BusinessReferralProfile.referral_code == code))
+        if not referrer_profile:
+            raise HTTPException(status_code=400, detail="That VEXION referral code is not valid.")
     business = Business(name=payload.business_name.strip(), industry=payload.industry.strip(), country=payload.country.upper(), profile_image_data_url=payload.profile_image_data_url)
     db.add_all([user, business])
     db.flush()
     db.add(Membership(user_id=user.id, business_id=business.id, role="owner"))
+    if referrer_profile:
+        db.add(BusinessReferral(referrer_business_id=referrer_profile.business_id, referred_business_id=business.id, status="pending_payment"))
     try:
         db.commit()
     except IntegrityError:
