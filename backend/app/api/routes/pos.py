@@ -170,3 +170,108 @@ def sales_summary(
         sales_total=f"{sales:.2f}", refunds_total=f"{refunds:.2f}",
         net_sales=f"{sales - refunds:.2f}", void_count=void_count,
     )
+
+
+@router.get("/analytics/daily")
+def daily_sales_analytics(
+    days: int = Query(default=30, ge=1, le=365),
+    currency: str = Query(default="ZAR", pattern="^[A-Za-z]{3}$"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    membership = current_membership(user, db)
+    require_reader(membership)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    day_expr = func.date(POSTransaction.occurred_at)
+    rows = db.execute(select(day_expr, POSTransaction.transaction_type, func.sum(POSTransaction.net_amount), func.count(POSTransaction.id)).where(
+        POSTransaction.business_id == membership.business_id,
+        POSTransaction.occurred_at >= since,
+        POSTransaction.currency == currency.upper(),
+    ).group_by(day_expr, POSTransaction.transaction_type).order_by(day_expr)).all()
+    grouped = {}
+    for day_value, kind, total, count in rows:
+        day_key = day_value.isoformat() if hasattr(day_value, "isoformat") else str(day_value)
+        item = grouped.setdefault(day_key, {"date": day_key, "sales": Decimal("0.00"), "refunds": Decimal("0.00"), "net_sales": Decimal("0.00"), "transaction_count": 0, "void_count": 0})
+        item["transaction_count"] += count
+        if kind == "sale":
+            item["sales"] += Decimal(total or 0)
+        elif kind == "refund":
+            item["refunds"] += Decimal(total or 0)
+        elif kind == "void":
+            item["void_count"] += count
+    output = []
+    for day_key in sorted(grouped):
+        item = grouped[day_key]
+        item["net_sales"] = item["sales"] - item["refunds"]
+        output.append({
+            "date": item["date"], "sales": f"{item['sales']:.2f}", "refunds": f"{item['refunds']:.2f}",
+            "net_sales": f"{item['net_sales']:.2f}", "transaction_count": item["transaction_count"], "void_count": item["void_count"],
+        })
+    return {"currency": currency.upper(), "days": days, "items": output}
+
+@router.get("/analytics/branches")
+def branch_sales_analytics(
+    days: int = Query(default=30, ge=1, le=365),
+    currency: str = Query(default="ZAR", pattern="^[A-Za-z]{3}$"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    membership = current_membership(user, db)
+    require_reader(membership)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    branch_expr = func.coalesce(POSTransaction.branch_name, "Unassigned")
+    rows = db.execute(select(branch_expr, POSTransaction.transaction_type, func.sum(POSTransaction.net_amount), func.count(POSTransaction.id)).where(
+        POSTransaction.business_id == membership.business_id,
+        POSTransaction.occurred_at >= since,
+        POSTransaction.currency == currency.upper(),
+    ).group_by(branch_expr, POSTransaction.transaction_type)).all()
+    grouped = {}
+    for branch, kind, total, count in rows:
+        item = grouped.setdefault(branch, {"branch": branch, "sales": Decimal("0.00"), "refunds": Decimal("0.00"), "net_sales": Decimal("0.00"), "transaction_count": 0, "void_count": 0})
+        item["transaction_count"] += count
+        if kind == "sale":
+            item["sales"] += Decimal(total or 0)
+        elif kind == "refund":
+            item["refunds"] += Decimal(total or 0)
+        elif kind == "void":
+            item["void_count"] += count
+    output = []
+    for item in grouped.values():
+        item["net_sales"] = item["sales"] - item["refunds"]
+        output.append({
+            "branch": item["branch"], "sales": f"{item['sales']:.2f}", "refunds": f"{item['refunds']:.2f}",
+            "net_sales": f"{item['net_sales']:.2f}", "transaction_count": item["transaction_count"], "void_count": item["void_count"],
+        })
+    return {"currency": currency.upper(), "days": days, "items": sorted(output, key=lambda row: Decimal(row["net_sales"]), reverse=True)}
+
+@router.get("/analytics/tills")
+def till_sales_analytics(
+    days: int = Query(default=30, ge=1, le=365),
+    currency: str = Query(default="ZAR", pattern="^[A-Za-z]{3}$"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    membership = current_membership(user, db)
+    require_reader(membership)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    branch_expr = func.coalesce(POSTransaction.branch_name, "Unassigned")
+    till_expr = func.coalesce(POSTransaction.till_name, "Unassigned")
+    rows = db.execute(select(branch_expr, till_expr, POSTransaction.transaction_type, func.sum(POSTransaction.net_amount), func.count(POSTransaction.id)).where(
+        POSTransaction.business_id == membership.business_id,
+        POSTransaction.occurred_at >= since,
+        POSTransaction.currency == currency.upper(),
+    ).group_by(branch_expr, till_expr, POSTransaction.transaction_type)).all()
+    grouped = {}
+    for branch, till, kind, total, count in rows:
+        key = (branch, till)
+        item = grouped.setdefault(key, {"branch": branch, "till": till, "sales": Decimal("0.00"), "refunds": Decimal("0.00"), "net_sales": Decimal("0.00"), "transaction_count": 0})
+        item["transaction_count"] += count
+        if kind == "sale":
+            item["sales"] += Decimal(total or 0)
+        elif kind == "refund":
+            item["refunds"] += Decimal(total or 0)
+    output = []
+    for item in grouped.values():
+        item["net_sales"] = item["sales"] - item["refunds"]
+        output.append({"branch":item["branch"],"till":item["till"],"net_sales":f"{item['net_sales']:.2f}","transaction_count":item["transaction_count"]})
+    return {"currency": currency.upper(), "days": days, "items": sorted(output, key=lambda row: Decimal(row["net_sales"]), reverse=True)}
