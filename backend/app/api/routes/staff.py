@@ -103,12 +103,28 @@ def send_invite_email(email: str, business_name: str, invite_url: str):
         logger.info("Staff invite email: attempting Gmail relay (host=%s)", relay_host)
         try:
             with urllib.request.urlopen(request, timeout=25) as response:
-                response_body = response.read().decode("utf-8")
+                response_body = response.read().decode("utf-8-sig").strip()
+                response_content_type = response.headers.get("Content-Type", "unknown").split(";")[0].strip().lower()
+                final_host = urlsplit(response.geturl()).hostname or "unknown"
                 try:
                     result = json.loads(response_body)
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    logger.error("Gmail relay returned a non-JSON response (host=%s, http_status=%s)", relay_host, response.status)
-                    raise EmailDeliveryError("GMAIL_RELAY_INVALID_RESPONSE") from None
+                except json.JSONDecodeError:
+                    # Google Apps Script may return an HTML access/deployment page instead
+                    # of the JSON body expected from doPost. Log metadata only.
+                    lowered = response_body[:2000].lower()
+                    if "accounts.google.com" in lowered or "sign in" in lowered or "authorization is required" in lowered:
+                        code = "GMAIL_RELAY_GOOGLE_AUTH_REQUIRED"
+                    elif "script function not found" in lowered or "donot" in lowered:
+                        code = "GMAIL_RELAY_DOPOST_NOT_FOUND"
+                    elif response_content_type == "text/html":
+                        code = "GMAIL_RELAY_HTML_RESPONSE"
+                    else:
+                        code = "GMAIL_RELAY_INVALID_RESPONSE"
+                    logger.error(
+                        "Gmail relay returned non-JSON (host=%s, final_host=%s, content_type=%s, http_status=%s, code=%s)",
+                        relay_host, final_host, response_content_type, response.status, code
+                    )
+                    raise EmailDeliveryError(code) from None
                 if response.status != 200:
                     logger.error("Gmail relay returned unexpected HTTP status (host=%s, http_status=%s)", relay_host, response.status)
                     raise EmailDeliveryError("GMAIL_RELAY_HTTP_" + str(response.status))
