@@ -20,7 +20,7 @@ from app.api.routes.auth import get_current_user
 from app.core.config import settings
 from app.db import get_db
 from app.models import Business, Membership, User
-from app.security import hash_password
+from app.security import hash_password, verify_password
 from app.models import utc_now
 
 logger = logging.getLogger(__name__)
@@ -186,6 +186,8 @@ def list_invitations(current_user: User = Depends(get_current_user), db: Session
 def create_invitation(payload: StaffInviteCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.models import StaffInvitation
     membership = require_admin(current_user, db)
+    if not payload.phone.strip().startswith("+"):
+        raise HTTPException(status_code=422, detail="Enter the WhatsApp number in international format, starting with +, for example +27 82 123 4567.")
     phone = "".join(ch for ch in payload.phone if ch.isdigit())
     if len(phone) < 8 or len(phone) > 15:
         raise HTTPException(status_code=422, detail="Enter a valid WhatsApp number with country code, for example +27 82 123 4567.")
@@ -221,6 +223,8 @@ def accept_invitation(payload: StaffAccept, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Use the email address that received this invitation.")
     user = db.scalar(select(User).where(User.email == email))
     if user:
+        if not verify_password(payload.password, user.password_hash):
+            raise HTTPException(status_code=403, detail="This email already has a BusinessBrain account. Enter that account password to accept the invitation.")
         if db.scalar(select(Membership).where(Membership.user_id == user.id, Membership.business_id == invite.business_id)):
             raise HTTPException(status_code=409, detail="This account already belongs to the business.")
         if not user.is_active:
