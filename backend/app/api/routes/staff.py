@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import secrets
 import smtplib
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,7 @@ from app.models import Business, Membership, User
 from app.security import hash_password
 from app.models import utc_now
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/staff", tags=["staff management"])
 ALLOWED_ROLES = {"admin", "manager", "employee", "hr"}
 
@@ -94,6 +96,15 @@ def create_invitation(payload: StaffInviteCreate, current_user: User = Depends(g
     try:
         sent = send_invite_email(email, business.name, invite_url)
     except Exception:
+        logger.exception(
+            "Staff invitation email delivery failed (smtp_host=%s, smtp_port=%s, "
+            "smtp_username_configured=%s, smtp_from_configured=%s, smtp_tls=%s)",
+            settings.smtp_host or "<missing>",
+            settings.smtp_port,
+            bool(settings.smtp_username),
+            bool(settings.smtp_from_email),
+            settings.smtp_use_tls,
+        )
         db.delete(invite)
         db.commit()
         raise HTTPException(status_code=502, detail="The invitation email could not be sent. Check the email service configuration and try again.")
