@@ -53,8 +53,8 @@ def require_admin(user: User, db: Session):
 def send_invite_email(email: str, business_name: str, invite_url: str):
     subject = f"You have been invited to {business_name} on BusinessBrain"
     body = (
-        f"You have been invited to join {business_name} on BusinessBrain.\\n\\n"
-        f"Accept your invitation using this secure link (expires in 48 hours):\\n{invite_url}\\n\\n"
+        f"You have been invited to join {business_name} on BusinessBrain.\n\n"
+        f"Accept your invitation using this secure link (expires in 48 hours):\n{invite_url}\n\n"
         "If you were not expecting this invitation, you can ignore this email."
     )
 
