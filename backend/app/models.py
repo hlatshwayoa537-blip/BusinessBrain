@@ -201,3 +201,38 @@ class FinanceTransaction(Base):
     reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class POSConnection(Base):
+    __tablename__ = "pos_connections"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    provider_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    integration_method: Mapped[str] = mapped_column(String(24), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", index=True)
+    secret_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    last_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class POSTransaction(Base):
+    __tablename__ = "pos_transactions"
+    __table_args__ = (UniqueConstraint("connection_id", "external_transaction_id", name="uq_pos_connection_external_transaction"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    connection_id: Mapped[str] = mapped_column(ForeignKey("pos_connections.id", ondelete="CASCADE"), nullable=False, index=True)
+    external_transaction_id: Mapped[str] = mapped_column(String(180), nullable=False)
+    branch_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    till_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    transaction_type: Mapped[str] = mapped_column(String(12), nullable=False, index=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="ZAR")
+    gross_amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    discount_amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    tax_amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    net_amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    payment_method: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)

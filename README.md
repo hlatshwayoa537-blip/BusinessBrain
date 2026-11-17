@@ -1,12 +1,12 @@
-# BusinessBrain
+# VEXION
 
-**Your Business. One Intelligent Brain.**
+**See More. Know More. Grow More.**
 
 An AI-powered business operating system built for Africa and the world.
 
 ## Product direction
 
-BusinessBrain brings core business operations, business intelligence, AI assistance and business-to-business collaboration into one secure workspace. AI recommendations must be grounded in authorised business records; consequential actions remain under human control.
+VEXION brings core business operations, business intelligence, AI assistance and business-to-business collaboration into one secure workspace. AI recommendations must be grounded in authorised business records; consequential actions remain under human control.
 
 ## Repository structure
 
@@ -126,6 +126,19 @@ Set these backend environment variables before enabling uploads:
 - `CLAMAV_HOST`, `CLAMAV_PORT` and optionally `CLAMAV_TIMEOUT_SECONDS` for a reachable ClamAV daemon.
 - Optionally tune `S3_UPLOAD_URL_EXPIRE_SECONDS` and `S3_DOWNLOAD_URL_EXPIRE_SECONDS`.
 
-The bucket must remain private, have public access blocked, and have lifecycle cleanup configured for abandoned `quarantine/` objects. Configure bucket CORS to allow the exact frontend origins and browser `POST` requests with the `Content-Type` form field. Do not expose bucket credentials to the frontend. Deploy and monitor ClamAV separately; if it is unavailable, BusinessBrain deliberately refuses to release files.
+The bucket must remain private, have public access blocked, and have lifecycle cleanup configured for abandoned `quarantine/` objects. Configure bucket CORS to allow the exact frontend origins and browser `POST` requests with the `Content-Type` form field. Do not expose bucket credentials to the frontend. Deploy and monitor ClamAV separately; if it is unavailable, VEXION deliberately refuses to release files.
 
 Migration `0007_deal_room_files` follows migration 0006. Apply `alembic upgrade head` before use. Storage and ClamAV credentials are not configured by this code change; document upload remains unavailable until the deployment environment and private bucket CORS are configured.
+
+
+## VEXION POS ingestion foundation
+
+VEXION supports a provider-neutral transaction model. POS providers can connect through a tested direct API adapter, webhook or authorised local connector. The shared ingestion endpoint accepts normalized sale, refund and void events. A POS provider is not considered integrated until its adapter has been implemented and tested against that provider.
+
+- `POST /api/v1/pos/connections` — owner/admin registers a connection and receives a one-time connector secret.
+- `GET /api/v1/pos/connections` — list connections for the authenticated business.
+- `POST /api/v1/pos/ingest/{connection_id}` — connector sends a normalized transaction using the `X-Vexion-Secret` header.
+- `GET /api/v1/pos/transactions` — list recent business transactions.
+- `GET /api/v1/pos/summary` — aggregate sales, refunds, voids and net sales.
+
+Connector secrets are stored only as SHA-256 digests and are shown only when created or rotated. Ingestion is idempotent per connection and external transaction ID. POS actuals are kept separate from manually entered finance records to avoid double-counting. The current foundation does not itself provide vendor-specific adapters, CSV upload parsing, item-level stock feeds or a local agent installer.

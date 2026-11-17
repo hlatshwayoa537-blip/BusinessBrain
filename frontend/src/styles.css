@@ -140,3 +140,18 @@
 @media(max-width:760px){.finance-centre{padding:15px}.finance-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.finance-toolbar{justify-content:space-between}.finance-form-row{grid-template-columns:1fr}.finance-record{align-items:flex-start;flex-wrap:wrap}.finance-record-value{margin-left:auto}.finance-record>button{margin-left:45px}.finance-chart{gap:3px}.finance-month small{font-size:7px}}
 
 .finance-input-hint{display:block;margin-top:-2px;color:#718a9b;font-size:9px;line-height:1.4}
+
+/* VEXION POS connections */
+.pos-workspace{margin-top:34px;border:1px solid #1c3041;background:#0b1a29;border-radius:14px;padding:24px}
+.pos-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}
+.pos-stats article{border:1px solid #22384a;background:#091725;border-radius:10px;padding:15px;display:grid;gap:8px}
+.pos-stats article span{font-size:10px;color:#8da2b3}.pos-stats article strong{font-family:Manrope,sans-serif;font-size:20px}
+.pos-layout{display:grid;grid-template-columns:minmax(260px,.85fr) minmax(0,1.35fr);gap:15px;margin-top:17px}
+.pos-connection-list{border:1px solid #203648;background:#091725;border-radius:11px;padding:17px;min-width:0}
+.pos-connection{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:9px;align-items:center;padding:14px 0;border-top:1px solid #1d3040}
+.pos-connection>div:first-child{display:grid;gap:5px;min-width:0}.pos-connection strong{font-size:12px}.pos-connection span,.pos-connection small{font-size:10px;color:#8da2b3}.pos-connection small{color:#647f91}
+.pos-status{padding:5px 8px;border-radius:20px;background:#243343;color:#b8c7d1!important;text-transform:capitalize}.pos-status.active{background:#123b36;color:#59d9bd!important}.pos-status.disabled{background:#40232b;color:#ffadb6!important}
+.pos-actions{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap}
+.pos-secret{margin:15px 0;padding:15px;border:1px solid #2b766d;background:#0d292d;border-radius:10px;display:grid;gap:8px}.pos-secret strong{font-size:12px}.pos-secret p{font-size:11px;color:#9bb7b7;margin:0}.pos-secret code{overflow-wrap:anywhere;padding:10px;background:#061820;border-radius:7px;color:#68e2cb;font-size:11px}
+@media(max-width:1000px){.pos-layout{grid-template-columns:1fr}.pos-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.pos-workspace{padding:16px}.pos-stats article strong{font-size:17px}.pos-connection{grid-template-columns:minmax(0,1fr) auto}}
