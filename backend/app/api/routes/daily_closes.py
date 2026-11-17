@@ -66,7 +66,7 @@ def serialize_close(row: DailyBusinessClose) -> dict:
     variance_total = actual_total - expected_total if expected_total is not None else None
     return {
         "id": row.id, "business_date": row.business_date.isoformat(), "branch_name": row.branch_name,
-        "currency": row.currency, "source_type": row.source_type, "pos_transaction_count": row.pos_transaction_count,
+        "currency": row.currency, "timezone_name": row.timezone_name, "source_type": row.source_type, "pos_transaction_count": row.pos_transaction_count,
         "expected_cash": as_money(row.expected_cash), "expected_card": as_money(row.expected_card),
         "expected_other": as_money(row.expected_other), "expected_total": as_money(expected_total) if expected_total is not None else None,
         "actual_cash": as_money(row.actual_cash), "actual_card": as_money(row.actual_card),
@@ -160,6 +160,7 @@ def save_daily_close(
         action = "updated"
         row.source_type = source_type
         row.currency = currency
+        row.timezone_name = payload.timezone_name
         row.expected_cash, row.expected_card, row.expected_other = expected_cash, expected_card, expected_other
         row.actual_cash, row.actual_card, row.actual_other = payload.actual_cash, payload.actual_card, payload.actual_other
         row.expenses_total = payload.expenses_total
@@ -175,7 +176,7 @@ def save_daily_close(
     else:
         row = DailyBusinessClose(
             id=str(uuid.uuid4()), business_id=membership.business_id, branch_name=branch,
-            business_date=payload.business_date, currency=currency, source_type=source_type,
+            business_date=payload.business_date, currency=currency, timezone_name=payload.timezone_name, source_type=source_type,
             expected_cash=expected_cash, expected_card=expected_card, expected_other=expected_other,
             actual_cash=payload.actual_cash, actual_card=payload.actual_card, actual_other=payload.actual_other,
             expenses_total=payload.expenses_total, pos_transaction_count=len(pos_rows), notes=payload.notes,
