@@ -64,11 +64,16 @@ def billing_overview(user: User = Depends(get_current_user), db: Session = Depen
     discount_eligible = paid_referrals >= 5
     unit_price = REFERRAL_PRICE if discount_eligible else STANDARD_PRICE
     subscription = db.scalar(select(BusinessSubscription).where(BusinessSubscription.business_id == business_id))
-    if subscription:
-        subscription.active_pos_count = active_count
-        subscription.referral_discount_applied = discount_eligible
-        subscription.updated_at = datetime.now(timezone.utc)
-        db.commit()
+    if not subscription:
+        subscription = BusinessSubscription(business_id=business_id)
+        db.add(subscription)
+    subscription.active_pos_count = active_count
+    subscription.referral_discount_applied = discount_eligible
+    subscription.unit_price = STANDARD_PRICE
+    subscription.discounted_unit_price = REFERRAL_PRICE
+    subscription.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(subscription)
     return {
         "currency": "ZAR",
         "subscription_status": subscription.status if subscription else "not_started",
