@@ -284,6 +284,7 @@ class DailyBusinessClose(Base):
     branch_name: Mapped[str] = mapped_column(String(160), nullable=False, default="Main branch")
     business_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="ZAR")
+    timezone_name: Mapped[str] = mapped_column(String(80), nullable=False, default="Africa/Johannesburg")
     source_type: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
     expected_cash: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     expected_card: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
