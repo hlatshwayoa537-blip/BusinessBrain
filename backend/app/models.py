@@ -315,3 +315,21 @@ class DailyBusinessCloseAudit(Base):
     action: Mapped[str] = mapped_column(String(32), nullable=False)
     details_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class BusinessReferralProfile(Base):
+    __tablename__ = "business_referral_profiles"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    referral_code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class BusinessReferral(Base):
+    __tablename__ = "business_referrals"
+    __table_args__ = (UniqueConstraint("referred_business_id", name="uq_referral_referred_business"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    referrer_business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    referred_business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending_payment", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)

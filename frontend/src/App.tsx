@@ -494,6 +494,64 @@ function InvoiceWorkspace({session}:{session:AuthData}) {
   </section>;
 }
 
+
+type ReferralDashboardData = {
+  referral_code: string;
+  registered_referrals: number;
+  payment_verified_referrals: number;
+  required_referrals: number;
+  remaining_to_qualify: number;
+  discount_eligible: boolean;
+  referrals: {id:string;business_name:string;status:string;created_at:string}[];
+  reward_terms: {standard_price_per_pos_month:number;qualified_price_per_pos_month:number;payment_verification_available:boolean;note:string};
+};
+
+function ReferralWorkspace({session}:{session:AuthData}) {
+  const [data,setData]=useState<ReferralDashboardData|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState("");
+  const [copied,setCopied]=useState(false);
+  async function load() {
+    setLoading(true); setError("");
+    try {
+      const response=await fetch(API_BASE+"/referrals/me",{headers:{Authorization:"Bearer "+session.access_token}});
+      const result=await response.json();
+      if(!response.ok) throw new Error(result.detail||"Could not load referral programme.");
+      setData(result as ReferralDashboardData);
+    } catch(err) {setError(err instanceof Error?err.message:"Could not load referral programme.");}
+    finally {setLoading(false);}
+  }
+  useEffect(()=>{void load();},[session.access_token]);
+  const referralLink=data ? window.location.origin+"/?ref="+encodeURIComponent(data.referral_code) : "";
+  async function copyLink() {
+    if(!referralLink) return;
+    try {await navigator.clipboard.writeText(referralLink);setCopied(true);}
+    catch {setError("Copy was blocked by this browser. Select and copy the referral link manually.");}
+  }
+  return <section className="finance-centre" id="referrals">
+    <div className="profile-centre-heading"><div><div className="eyebrow">VEXION GROWTH PROGRAMME</div><h2>Refer businesses. Unlock lower POS pricing.</h2><p>Share your direct referral link. Your referred businesses appear here after they register.</p></div><span className="profile-status">Direct referrals only</span></div>
+    {error && <p className="finance-alert" role="alert">{error}</p>}
+    {loading ? <p className="network-empty">Loading your referral programme…</p> : data && <>
+      <div className="finance-stats">
+        <article><span>Businesses registered</span><strong>{data.registered_referrals}</strong><small>Direct referrals attributed to you</small></article>
+        <article><span>Payments verified</span><strong>{data.payment_verified_referrals}</strong><small>Required to unlock the reward</small></article>
+        <article><span>Still needed</span><strong>{data.remaining_to_qualify}</strong><small>Five paying businesses qualify</small></article>
+        <article><span>Your POS price</span><strong>R {data.discount_eligible?399:499}</strong><small>Per active POS terminal / month</small></article>
+      </div>
+      <div className="finance-form">
+        <h3>Your referral code</h3>
+        <div className="finance-outstanding"><strong>{data.referral_code}</strong><button type="button" className="network-primary-button" onClick={()=>void copyLink()}>{copied?"Copied":"Copy referral link"}</button></div>
+        <label>Share this link<input readOnly value={referralLink}/></label>
+        <p className="finance-disclaimer">Reward rule: refer five separate businesses that become paying VEXION customers. Once verified, your subscription price becomes R399 per POS terminal per month instead of R499. This is a single-level programme; there are no downline commissions.</p>
+        <p className="finance-alert">{data.reward_terms.note}</p>
+      </div>
+      <div className="finance-report"><div className="recruitment-card-heading"><div><span className="eyebrow">YOUR REFERRALS</span><h3>Businesses you've introduced</h3></div><span className="module-count">{data.referrals.length} TOTAL</span></div>
+        {data.referrals.length===0?<p className="network-empty">No businesses have registered through your referral link yet.</p>:<div className="deal-file-list">{data.referrals.map(item=><article className="deal-file-card" key={item.id}><div className="deal-file-info"><strong>{item.business_name}</strong><span>Joined {new Date(item.created_at).toLocaleDateString("en-ZA")}</span></div><span className="quotation-status status-sent">{item.status.replaceAll("_"," ")}</span></article>)}</div>}
+      </div>
+    </>}
+  </section>;
+}
+
 export default function App() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
   const [session, setSession] = useState<AuthData | null>(readSession);
@@ -506,6 +564,7 @@ export default function App() {
   const [businessName, setBusinessName] = useState("");
   const [industry, setIndustry] = useState("");
   const [country, setCountry] = useState("ZA");
+  const [referralCode, setReferralCode] = useState(() => new URLSearchParams(window.location.search).get("ref")?.toUpperCase() ?? "");
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [imageError, setImageError] = useState("");
   const [profileDraft, setProfileDraft] = useState<BusinessProfile>(() => ({
@@ -802,7 +861,7 @@ export default function App() {
     setBusy(true);
     setError("");
     const payload = mode === "register"
-      ? { full_name: fullName, email, password, business_name: businessName, industry, country, profile_image_data_url: profileImage }
+      ? { full_name: fullName, email, password, business_name: businessName, industry, country, profile_image_data_url: profileImage, referral_code: referralCode.trim() || null }
       : { identifier: email, password };
     try {
       const response = await fetch(`${API_BASE}/auth/${mode}`, {
@@ -918,7 +977,7 @@ export default function App() {
           {mode === "register" && <><label>Full name<input required minLength={2} maxLength={160} autoComplete="name" value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="Your full name"/></label></>}
           <label>{mode === "register" ? "Business email" : "Email or WhatsApp number"}<input required type={mode === "register" ? "email" : "text"} autoComplete={mode === "register" ? "email" : "username"} value={email} onChange={e=>setEmail(e.target.value)} placeholder={mode === "register" ? "you@company.com" : "Email or +27 82 123 4567"}/></label>
           <label>Password<input required type="password" minLength={mode === "register" ? 12 : 1} maxLength={128} autoComplete={mode === "register" ? "new-password" : "current-password"} value={password} onChange={e=>setPassword(e.target.value)} placeholder={mode === "register" ? "At least 12 characters" : "Your password"}/></label>
-          {mode === "register" && <><label>Business name<input required minLength={2} maxLength={200} value={businessName} onChange={e=>setBusinessName(e.target.value)} placeholder="Your registered or trading name"/></label><div className="profile-upload"><div className="profile-upload-preview">{profileImage ? <img src={profileImage} alt="Business profile preview"/> : <Building2 size={25}/>}</div><div className="profile-upload-copy"><strong>Business profile picture</strong><span>Add your company logo or business photo. Optional.</span><label className="profile-upload-button">{profileImage ? "Change image" : "Upload image"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>handleProfileImage(e.target.files?.[0])}/></label>{imageError && <small className="profile-upload-error">{imageError}</small>}</div></div><div className="auth-two-col"><label>Industry<input required minLength={2} maxLength={120} value={industry} onChange={e=>setIndustry(e.target.value)} placeholder="e.g. Retail"/></label><label>Country<select value={country} onChange={e=>setCountry(e.target.value)}><option value="ZA">South Africa</option><option value="NG">Nigeria</option><option value="KE">Kenya</option><option value="GH">Ghana</option><option value="BW">Botswana</option><option value="ZM">Zambia</option><option value="ZW">Zimbabwe</option><option value="OT">Other</option></select></label></div></>}
+          {mode === "register" && <><label>Business name<input required minLength={2} maxLength={200} value={businessName} onChange={e=>setBusinessName(e.target.value)} placeholder="Your registered or trading name"/></label><label>Referral code (optional)<input maxLength={20} value={referralCode} onChange={e=>setReferralCode(e.target.value.toUpperCase())} placeholder="Enter a VEXION referral code"/></label><div className="profile-upload"><div className="profile-upload-preview">{profileImage ? <img src={profileImage} alt="Business profile preview"/> : <Building2 size={25}/>}</div><div className="profile-upload-copy"><strong>Business profile picture</strong><span>Add your company logo or business photo. Optional.</span><label className="profile-upload-button">{profileImage ? "Change image" : "Upload image"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>handleProfileImage(e.target.files?.[0])}/></label>{imageError && <small className="profile-upload-error">{imageError}</small>}</div></div><div className="auth-two-col"><label>Industry<input required minLength={2} maxLength={120} value={industry} onChange={e=>setIndustry(e.target.value)} placeholder="e.g. Retail"/></label><label>Country<select value={country} onChange={e=>setCountry(e.target.value)}><option value="ZA">South Africa</option><option value="NG">Nigeria</option><option value="KE">Kenya</option><option value="GH">Ghana</option><option value="BW">Botswana</option><option value="ZM">Zambia</option><option value="ZW">Zimbabwe</option><option value="OT">Other</option></select></label></div></>}
           {error && <div className="auth-error" role="alert">{error}</div>}
           {apiStatus === "offline" && <div className="auth-warning">The VEXION API is not reachable yet. Check that the backend is running and try again.</div>}
           <button className="auth-submit" type="submit" disabled={busy || apiStatus !== "online"}>{busy ? "Please wait…" : mode === "register" ? "Create business workspace" : "Sign in securely"} <ArrowUpRight size={17}/></button>
@@ -934,7 +993,7 @@ export default function App() {
       <a className="brand" href="/" aria-label="VEXION home"><div className="brand-mark"><Activity size={22}/></div><span>VEXION</span></a>
       <div className="workspace-label">WORKSPACE</div>
       <div className="workspace-switch"><span className="workspace-icon">{session.business.profile_image_data_url ? <img src={session.business.profile_image_data_url} alt="Business profile"/> : <Building2 size={17}/>}</span><span><strong>{session.business.name}</strong><small>{session.business.industry}</small></span><ChevronRight size={16}/></div>
-      <nav className="navigation" aria-label="Main navigation"><a className="nav-item active" href="#overview"><LayoutDashboard size={18}/>Overview</a><a className="nav-item" href="#pos-connections"><Activity size={18}/>POS Connections</a><a className="nav-item" href="#sales-intelligence"><ChartNoAxesCombined size={18}/>Sales Intelligence</a><a className="nav-item" href="#invoices"><FileText size={18}/>Invoices</a><a className="nav-item" href="#finance"><CreditCard size={18}/>Expenses & Profit</a><a className="nav-item" href="#customers"><Users size={18}/>Customers</a><a className="nav-item" href="#operations"><Package size={18}/>Operations</a><a className="nav-item" href="#team"><Users size={18}/>Team Management</a><a className="nav-item" href="#people"><BriefcaseBusiness size={18}/>People & HR</a><a className="nav-item" href="#business-profile"><Building2 size={18}/>Business Profile</a><a className="nav-item" href="#network"><Building2 size={18}/>Business Network</a><a className="nav-item" href="#private-conversations"><LockKeyhole size={18}/>Private Conversations</a></nav>
+      <nav className="navigation" aria-label="Main navigation"><a className="nav-item active" href="#overview"><LayoutDashboard size={18}/>Overview</a><a className="nav-item" href="#pos-connections"><Activity size={18}/>POS Connections</a><a className="nav-item" href="#sales-intelligence"><ChartNoAxesCombined size={18}/>Sales Intelligence</a><a className="nav-item" href="#invoices"><FileText size={18}/>Invoices</a><a className="nav-item" href="#finance"><CreditCard size={18}/>Expenses & Profit</a><a className="nav-item" href="#referrals"><Users size={18}/>Refer & Earn</a><a className="nav-item" href="#customers"><Users size={18}/>Customers</a><a className="nav-item" href="#operations"><Package size={18}/>Operations</a><a className="nav-item" href="#team"><Users size={18}/>Team Management</a><a className="nav-item" href="#people"><BriefcaseBusiness size={18}/>People & HR</a><a className="nav-item" href="#business-profile"><Building2 size={18}/>Business Profile</a><a className="nav-item" href="#network"><Building2 size={18}/>Business Network</a><a className="nav-item" href="#private-conversations"><LockKeyhole size={18}/>Private Conversations</a></nav>
       <div className="sidebar-bottom"><a className="nav-item" href="#settings"><Settings2 size={18}/>Settings</a><a className="nav-item" href="#help"><CircleHelp size={18}/>Help & support</a><button className="nav-item signout-button" onClick={signOut}><LogOut size={18}/>Sign out</button><div className="security-note"><ShieldCheck size={17}/><span>Designed with business data security at its core.</span></div></div>
     </aside>
     <main className="main-content" id="overview">
@@ -942,6 +1001,7 @@ export default function App() {
       <section className="welcome-section"><div><div className="eyebrow">INTELLIGENCE FOR EVERY BUSINESS.</div><h1>Welcome,<br/><span>{session.user.full_name.split(" ")[0]}.</span></h1><p>Your {session.business.name} workspace is ready for connected sales, financial visibility and smarter growth decisions.</p><div className="workspace-created"><ShieldCheck size={16}/> Business workspace created successfully</div></div><div className="welcome-visual" aria-hidden="true"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="brain-core"><Bot size={52} strokeWidth={1.25}/></div><div className="orbit-dot dot-one"/><div className="orbit-dot dot-two"/><div className="orbit-dot dot-three"/><div className="visual-caption">BUSINESS INTELLIGENCE</div></div></section>
       <POSConnectionsWorkspace session={session} />
       <DailyCloseWorkspace session={session} />
+      <ReferralWorkspace session={session} />
       <SalesIntelligenceWorkspace session={session} />
       <InvoiceWorkspace session={session} />
       <FinanceWorkspace session={session} />
