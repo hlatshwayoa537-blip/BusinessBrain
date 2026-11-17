@@ -186,6 +186,123 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
 }
 
 
+
+type DailyCloseRow = {
+  id:string; business_date:string; branch_name:string; source_type:"pos"|"manual"; pos_transaction_count:number;
+  expected_cash:string; expected_card:string; expected_other:string; expected_total:string|null;
+  actual_cash:string; actual_card:string; actual_other:string; actual_total:string; expenses_total:string;
+  variance_cash:string|null; variance_card:string|null; variance_other:string|null; variance_total:string|null;
+  notes?:string|null; status:string; review_note?:string|null;
+};
+function DailyCloseWorkspace({session}:{session:AuthData}) {
+  const today=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+  const [businessDate,setBusinessDate]=useState(today);
+  const [branch,setBranch]=useState("Main branch");
+  const [expectedCash,setExpectedCash]=useState("");
+  const [expectedCard,setExpectedCard]=useState("");
+  const [expectedOther,setExpectedOther]=useState("0");
+  const [actualCash,setActualCash]=useState("");
+  const [actualCard,setActualCard]=useState("");
+  const [actualOther,setActualOther]=useState("0");
+  const [expenses,setExpenses]=useState("0");
+  const [notes,setNotes]=useState("");
+  const [rows,setRows]=useState<DailyCloseRow[]>([]);
+  const [selected,setSelected]=useState<DailyCloseRow|null>(null);
+  const [reviewNote,setReviewNote]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState("");
+  const [message,setMessage]=useState("");
+  async function request(path:string,method="GET",body?:unknown) {
+    const response=await fetch(API_BASE+path,{method,headers:{Authorization:"Bearer "+session.access_token,...(body?{"Content-Type":"application/json"}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    const data=await response.json();
+    if(!response.ok)throw new Error(data.detail||"Daily close request failed.");
+    return data;
+  }
+  async function load() {
+    setLoading(true);setError("");
+    try {const data=await request("/daily-closes") as DailyCloseRow[];setRows(data);}
+    catch(e){setError(e instanceof Error?e.message:"Could not load daily closes.");}
+    finally{setLoading(false);}
+  }
+  useEffect(()=>{void load();},[session.access_token]);
+  async function save(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();setBusy(true);setError("");setMessage("");
+    try {
+      const data=await request("/daily-closes","POST",{
+        business_date:businessDate,branch_name:branch,timezone_name:Intl.DateTimeFormat().resolvedOptions().timeZone||"Africa/Johannesburg",
+        expected_cash:expectedCash,expected_card:expectedCard,expected_other:expectedOther,
+        actual_cash:actualCash,actual_card:actualCard,actual_other:actualOther,expenses_total:expenses,notes:notes||null
+      }) as DailyCloseRow;
+      setSelected(data);setMessage(data.source_type==="pos"?"Saved. Expected totals were calculated from matching POS transactions.":"Saved as a manual close because no matching POS transactions were found.");
+      await load();
+    } catch(e){setError(e instanceof Error?e.message:"Could not save this close.");}
+    finally{setBusy(false);}
+  }
+  async function submitClose(row:DailyCloseRow) {
+    setBusy(true);setError("");setMessage("");
+    try {const data=await request("/daily-closes/"+row.id+"/submit","POST") as DailyCloseRow;setSelected(data);setMessage("Daily close submitted for manager review.");await load();}
+    catch(e){setError(e instanceof Error?e.message:"Could not submit this close.");}
+    finally{setBusy(false);}
+  }
+  async function review(row:DailyCloseRow,decision:"approved"|"requires_attention") {
+    setBusy(true);setError("");setMessage("");
+    try {const data=await request("/daily-closes/"+row.id+"/review","POST",{decision,note:reviewNote||null}) as DailyCloseRow;setSelected(data);setReviewNote("");setMessage(decision==="approved"?"Daily close approved.":"Daily close returned for attention.");await load();}
+    catch(e){setError(e instanceof Error?e.message:"Could not review this close.");}
+    finally{setBusy(false);}
+  }
+  const money=(v:string|null)=>v===null?"Not available":"R "+Number(v).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});
+  return <section className="finance-centre" id="daily-close">
+    <div className="profile-centre-heading"><div><div className="eyebrow">VEXION BUSINESS CONTROL</div><h2>Daily business close.</h2><p>Reconcile expected receipts against counted cash, card settlements and other payments. Submit each day for review.</p></div><span className="profile-status">Audited workflow</span></div>
+    <div className="finance-stats">
+      <article><span>Awaiting review</span><strong>{rows.filter(row=>row.status==="submitted").length}</strong><small>Submitted daily closes</small></article>
+      <article><span>Needs attention</span><strong>{rows.filter(row=>row.status==="requires_attention").length}</strong><small>Returned for correction</small></article>
+      <article><span>Approved</span><strong>{rows.filter(row=>row.status==="approved").length}</strong><small>Reviewed daily closes</small></article>
+      <article><span>Recorded days</span><strong>{rows.length}</strong><small>Latest 100 business days</small></article>
+    </div>
+    {error&&<p className="finance-alert" role="alert">{error}</p>}{message&&<p className="finance-success" role="status">{message}</p>}
+    <div className="pos-layout">
+      <form className="finance-form" onSubmit={save}>
+        <div className="recruitment-card-heading"><div><span className="eyebrow">CLOSE A BUSINESS DAY</span><h3>Record the day's figures</h3></div></div>
+        <label>Business date<input type="date" required value={businessDate} onChange={e=>setBusinessDate(e.target.value)}/></label>
+        <label>Branch / store<input required maxLength={160} value={branch} onChange={e=>setBranch(e.target.value)} /></label>
+        <p className="finance-disclaimer">Expected totals are taken from matching POS transactions when available. Otherwise enter the expected figures from your till/Z report. Actual figures must be counted or confirmed by staff.</p>
+        <div className="profile-fields-grid">
+          <label>Expected cash (R)<input type="number" min="0" step="0.01" required value={expectedCash} onChange={e=>setExpectedCash(e.target.value)} placeholder="0.00"/></label>
+          <label>Expected card (R)<input type="number" min="0" step="0.01" required value={expectedCard} onChange={e=>setExpectedCard(e.target.value)} placeholder="0.00"/></label>
+          <label>Expected other (R)<input type="number" min="0" step="0.01" required value={expectedOther} onChange={e=>setExpectedOther(e.target.value)}/></label>
+          <label>Cash counted (R)<input type="number" min="0" step="0.01" required value={actualCash} onChange={e=>setActualCash(e.target.value)} placeholder="0.00"/></label>
+          <label>Card settled / confirmed (R)<input type="number" min="0" step="0.01" required value={actualCard} onChange={e=>setActualCard(e.target.value)} placeholder="0.00"/></label>
+          <label>Other received (R)<input type="number" min="0" step="0.01" required value={actualOther} onChange={e=>setActualOther(e.target.value)}/></label>
+          <label>Expenses recorded for the day (R)<input type="number" min="0" step="0.01" required value={expenses} onChange={e=>setExpenses(e.target.value)}/></label>
+        </div>
+        <label>Closing notes<textarea maxLength={4000} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Explain unusual items, missing slips or cash count notes."/></label>
+        <button className="auth-submit" type="submit" disabled={busy}>{busy?"Saving…":"Save daily close"} <ArrowUpRight size={16}/></button>
+      </form>
+      <div className="finance-form">
+        <div className="recruitment-card-heading"><div><span className="eyebrow">REVIEW QUEUE</span><h3>Recent daily closes</h3></div><button type="button" className="network-secondary-button" onClick={()=>void load()}>Refresh</button></div>
+        {loading?<p className="network-empty">Loading daily closes…</p>:rows.length===0?<p className="network-empty">No daily closes recorded yet. Start with your first branch and business date.</p>:<div className="finance-record-list">{rows.map(row=><button type="button" key={row.id} className="finance-record-row" onClick={()=>setSelected(row)}><span><strong>{row.branch_name}</strong><small>{row.business_date} · {row.source_type==="pos"?"POS reconciled":"Manual figures"}</small></span><span><strong>{row.status.replace("_"," ")}</strong><small>Variance: {money(row.variance_total)}</small></span></button>)}</div>}
+      </div>
+    </div>
+    {selected&&<div className="finance-form daily-close-detail">
+      <div className="recruitment-card-heading"><div><span className="eyebrow">RECONCILIATION DETAIL</span><h3>{selected.branch_name} · {selected.business_date}</h3></div><span className="profile-status">{selected.status.replace("_"," ")}</span></div>
+      <div className="finance-stats">
+        <article><span>Expected total</span><strong>{money(selected.expected_total)}</strong><small>{selected.source_type==="pos"?selected.pos_transaction_count+" POS transactions":"Manual till report figures"}</small></article>
+        <article><span>Actual received</span><strong>{money(selected.actual_total)}</strong><small>Cash + card + other</small></article>
+        <article><span>Difference</span><strong className={Number(selected.variance_total??0)===0?"finance-positive":"finance-negative"}>{money(selected.variance_total)}</strong><small>Actual less expected</small></article>
+        <article><span>Expenses</span><strong>{money(selected.expenses_total)}</strong><small>Separately recorded</small></article>
+      </div>
+      <div className="profile-fields-grid">
+        <p>Cash difference: <strong>{money(selected.variance_cash)}</strong></p><p>Card difference: <strong>{money(selected.variance_card)}</strong></p><p>Other difference: <strong>{money(selected.variance_other)}</strong></p>
+      </div>
+      {selected.notes&&<p>{selected.notes}</p>}{selected.review_note&&<p className="finance-alert">Review note: {selected.review_note}</p>}
+      {selected.status==="draft"&&<button type="button" className="auth-submit" disabled={busy} onClick={()=>void submitClose(selected)}>Submit for manager review</button>}
+      {selected.status==="submitted"&&<><label>Review note<textarea value={reviewNote} onChange={e=>setReviewNote(e.target.value)} placeholder="Optional note for the staff member."/></label><div className="pos-actions"><button type="button" className="auth-submit" disabled={busy} onClick={()=>void review(selected,"approved")}>Approve close</button><button type="button" className="network-secondary-button" disabled={busy} onClick={()=>void review(selected,"requires_attention")}>Return for attention</button></div></>}
+    </div>}
+    <p className="finance-disclaimer">A variance is a discrepancy requiring review, not proof of wrongdoing. VEXION only calculates against records supplied or connected to the business. The review history is retained for audit purposes.</p>
+  </section>;
+}
+
 type POSConnectionData = { id:string; provider_name:string; display_name:string; integration_method:"api"|"webhook"|"local_agent"; status:string; created_at:string; last_received_at?:string|null; webhook_secret?:string };
 type POSSalesData = { days:number; transaction_count:number; sales_total:string; refunds_total:string; net_sales:string; void_count:number };
 function POSConnectionsWorkspace({session}:{session:AuthData}) {
@@ -824,6 +941,7 @@ export default function App() {
       <header className="topbar"><div className="breadcrumb">Workspace <ChevronRight size={14}/> <strong>Overview</strong></div><div className="topbar-actions"><span className={`api-indicator ${apiStatus}`}><i/>{apiStatus === "online" ? "API connected" : "API offline"}</span><button className="icon-button" aria-label="Security status"><LockKeyhole size={18}/></button><div className="avatar">{session.user.full_name.split(" ").map(x=>x[0]).slice(0,2).join("").toUpperCase()}</div></div></header>
       <section className="welcome-section"><div><div className="eyebrow">INTELLIGENCE FOR EVERY BUSINESS.</div><h1>Welcome,<br/><span>{session.user.full_name.split(" ")[0]}.</span></h1><p>Your {session.business.name} workspace is ready for connected sales, financial visibility and smarter growth decisions.</p><div className="workspace-created"><ShieldCheck size={16}/> Business workspace created successfully</div></div><div className="welcome-visual" aria-hidden="true"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="brain-core"><Bot size={52} strokeWidth={1.25}/></div><div className="orbit-dot dot-one"/><div className="orbit-dot dot-two"/><div className="orbit-dot dot-three"/><div className="visual-caption">BUSINESS INTELLIGENCE</div></div></section>
       <POSConnectionsWorkspace session={session} />
+      <DailyCloseWorkspace session={session} />
       <SalesIntelligenceWorkspace session={session} />
       <InvoiceWorkspace session={session} />
       <FinanceWorkspace session={session} />
