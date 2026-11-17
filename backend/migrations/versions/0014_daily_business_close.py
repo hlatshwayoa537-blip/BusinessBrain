@@ -16,6 +16,7 @@ def upgrade() -> None:
         sa.Column("branch_name", sa.String(160), nullable=False, server_default="Main branch"),
         sa.Column("business_date", sa.Date(), nullable=False),
         sa.Column("currency", sa.String(3), nullable=False, server_default="ZAR"),
+        sa.Column("timezone_name", sa.String(80), nullable=False, server_default="Africa/Johannesburg"),
         sa.Column("source_type", sa.String(16), nullable=False, server_default="manual"),
         sa.Column("expected_cash", sa.Numeric(14, 2), nullable=True),
         sa.Column("expected_card", sa.Numeric(14, 2), nullable=True),
