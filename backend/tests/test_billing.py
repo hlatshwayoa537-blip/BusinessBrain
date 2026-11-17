@@ -77,3 +77,66 @@ def test_billing_terminal_registry_is_tenant_scoped(client):
 
 def test_billing_requires_authentication(client):
     assert client.get("/api/v1/billing/me").status_code == 401
+
+
+
+def test_billing_discovers_pos_terminals_from_ingested_till_transactions(client):
+    headers = register_owner(client, "billing-auto-discovery@example.com")
+    connection = client.post("/api/v1/pos/connections", headers=headers, json={
+        "provider_name": "Generic POS", "display_name": "Store POS", "integration_method": "webhook"
+    }).json()
+    secret = connection["webhook_secret"]
+    base = {
+        "occurred_at": "2026-11-17T10:00:00+02:00", "currency": "ZAR",
+        "gross_amount": "100.00", "discount_amount": "0.00",
+        "tax_amount": "0.00", "net_amount": "100.00", "payment_method": "card",
+        "transaction_type": "sale",
+    }
+    records = [
+        {**base, "external_transaction_id": "DISCOVER-1", "branch_name": "Durban", "till_name": "Till 01"},
+        {**base, "external_transaction_id": "DISCOVER-2", "branch_name": "Durban", "till_name": "Till 02"},
+        {**base, "external_transaction_id": "DISCOVER-3", "branch_name": "Pinetown", "till_name": "Till 01"},
+    ]
+    for payload in records:
+        response = client.post(
+            f"/api/v1/pos/ingest/{connection['id']}",
+            headers={"X-Vexion-Secret": secret},
+            json=payload,
+        )
+        assert response.status_code == 201
+
+    overview = client.get("/api/v1/billing/me", headers=headers)
+    assert overview.status_code == 200
+    body = overview.json()
+    assert body["active_pos_terminals"] == 3
+    assert body["estimated_monthly_total"] == "1497.00"
+    assert len(body["terminals"]) == 3
+    assert all(row["source"] == "connected_pos_feed" for row in body["terminals"])
+    assert {row["display_name"] for row in body["terminals"]} == {"Till 01", "Till 02"}
+    assert {row["branch_name"] for row in body["terminals"]} == {"Durban", "Pinetown"}
+
+    again = client.get("/api/v1/billing/me", headers=headers)
+    assert len(again.json()["terminals"]) == 3
+
+
+def test_billing_discovers_terminals_from_csv_imported_pos_data(client):
+    headers = register_owner(client, "billing-csv-discovery@example.com")
+    connection = client.post("/api/v1/pos/connections", headers=headers, json={
+        "provider_name": "Generic POS", "display_name": "CSV POS", "integration_method": "webhook"
+    }).json()
+    csv_text = "Receipt,Date,Total,Branch,Till\\nCSV-TILL-1,2026-11-17T10:00:00+02:00,120.00,Durban,Front\\n"
+    mapping = {
+        "external_transaction_id": "Receipt", "occurred_at": "Date",
+        "gross_amount": "Total", "net_amount": "Total",
+        "branch_name": "Branch", "till_name": "Till",
+    }
+    imported = client.post(
+        f"/api/v1/pos/connections/{connection['id']}/import-csv",
+        headers=headers, json={"csv_text": csv_text, "mapping": mapping},
+    )
+    assert imported.status_code == 200
+    assert imported.json()["imported"] == 1
+    overview = client.get("/api/v1/billing/me", headers=headers)
+    assert overview.status_code == 200
+    assert overview.json()["active_pos_terminals"] == 1
+    assert overview.json()["terminals"][0]["source"] == "connected_pos_feed"
