@@ -188,7 +188,7 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
 
 
 type DailyCloseRow = {
-  id:string; business_date:string; branch_name:string; source_type:"pos"|"manual"; pos_transaction_count:number;
+  id:string; business_date:string; branch_name:string; timezone_name:string; source_type:"pos"|"manual"; pos_transaction_count:number;
   expected_cash:string; expected_card:string; expected_other:string; expected_total:string|null;
   actual_cash:string; actual_card:string; actual_other:string; actual_total:string; expenses_total:string;
   variance_cash:string|null; variance_card:string|null; variance_other:string|null; variance_total:string|null;
