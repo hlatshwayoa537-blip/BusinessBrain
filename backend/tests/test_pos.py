@@ -91,9 +91,9 @@ def test_csv_import_maps_columns_and_skips_duplicate_transactions(client):
     headers = auth_headers(client, "pos-csv@example.com")
     connection = create_pos_connection(client, headers).json()
     csv_text = (
-        "Receipt,Date,Total,Branch,Till,Method\\n"
-        "CSV-100,2026-11-17T10:00:00+02:00,125.50,Durban,02,card\\n"
-        "CSV-100,2026-11-17T10:00:00+02:00,125.50,Durban,02,card\\n"
+        "Receipt,Date,Total,Branch,Till,Method\n"
+        "CSV-100,2026-11-17T10:00:00+02:00,125.50,Durban,02,card\n"
+        "CSV-100,2026-11-17T10:00:00+02:00,125.50,Durban,02,card\n"
     )
     mapping = {
         "external_transaction_id": "Receipt", "occurred_at": "Date",
@@ -118,7 +118,7 @@ def test_csv_import_rejects_invalid_rows(client):
     response = client.post(
         f"/api/v1/pos/connections/{connection['id']}/import-csv",
         headers=headers,
-        json={"csv_text": "ID,Date,Gross,Net\\nBAD,not-a-date,abc,xyz\\n",
+        json={"csv_text": "ID,Date,Gross,Net\nBAD,not-a-date,abc,xyz\n",
               "mapping": {"external_transaction_id":"ID","occurred_at":"Date","gross_amount":"Gross","net_amount":"Net"}},
     )
     assert response.status_code == 200
