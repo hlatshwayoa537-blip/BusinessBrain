@@ -509,7 +509,7 @@ type BillingOverview = {
   standard_unit_price: string;
   referral_unit_price: string;
   notice: string;
-  terminals: {id:string;external_terminal_id:string;display_name:string;branch_name?:string|null;status:string;created_at:string}[];
+  terminals: {id:string;external_terminal_id:string;display_name:string;branch_name?:string|null;connection_id?:string|null;source?:string;status:string;created_at:string}[];
 };
 
 function BillingWorkspace({session}:{session:AuthData}) {
@@ -571,12 +571,12 @@ function BillingWorkspace({session}:{session:AuthData}) {
           <label>Display name<input required minLength={2} maxLength={160} value={terminalName} onChange={e=>setTerminalName(e.target.value)} placeholder="e.g. Front counter"/></label>
           <label>Branch / location (optional)<input maxLength={160} value={branchName} onChange={e=>setBranchName(e.target.value)} placeholder="e.g. Durban branch"/></label>
           <button className="auth-submit" type="submit" disabled={busy}>{busy?"Registering…":"Register POS terminal"} <ArrowUpRight size={16}/></button>
-          <p className="finance-disclaimer">Only register genuine POS terminals belonging to this business. This list is currently maintained manually; it is not yet automatically discovered from a POS provider.</p>
+          <p className="finance-disclaimer">Only register genuine POS terminals belonging to this business. Connected POS feeds automatically add tills here when transactions include a till name and branch. Manual registration remains available for tills that have not reported yet.</p>
         </form>
         <div className="billing-terminal-list">
           <div className="recruitment-card-heading"><div><span className="eyebrow">REGISTERED EQUIPMENT</span><h3>Your POS terminals</h3></div><button type="button" className="network-secondary-button" onClick={()=>void load()}>Refresh</button></div>
           {data.terminals.length===0?<p className="network-empty">No POS terminals registered yet. Add each genuine till to calculate your estimate.</p>:data.terminals.map(terminal=><article className="billing-terminal" key={terminal.id}>
-            <div><strong>{terminal.display_name}</strong><span>{terminal.external_terminal_id}{terminal.branch_name?" · "+terminal.branch_name:""}</span></div>
+            <div><strong>{terminal.display_name}</strong><span>{terminal.branch_name?terminal.branch_name+" · ":""}{terminal.source==="connected_pos_feed"?"Detected from connected POS feed":"Manually registered"}</span></div>
             <div className="billing-terminal-actions"><span className={"billing-terminal-status "+terminal.status}>{terminal.status}</span><button type="button" className="network-secondary-button" onClick={()=>void setTerminalStatus(terminal.id,terminal.status==="active"?"inactive":"active")}>{terminal.status==="active"?"Deactivate":"Activate"}</button></div>
           </article>)}
         </div>

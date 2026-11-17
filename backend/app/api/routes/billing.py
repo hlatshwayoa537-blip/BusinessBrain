@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.routes.auth import get_current_user
 from app.db import get_db
-from app.models import BusinessReferral, BusinessSubscription, BusinessPOSTerminal, Membership, POSConnection, User
+from app.models import BusinessReferral, BusinessSubscription, BusinessPOSTerminal, Membership, POSConnection, POSTransaction, User
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 STANDARD_PRICE = Decimal("499.00")
@@ -43,14 +44,68 @@ def terminal_payload(row: BusinessPOSTerminal) -> dict:
         "display_name": row.display_name,
         "branch_name": row.branch_name,
         "connection_id": row.connection_id,
+        "source": "connected_pos_feed" if row.connection_id else "manual",
         "status": row.status,
         "created_at": row.created_at.isoformat(),
     }
 
 
+def sync_discovered_terminals(db: Session, business_id: str) -> int:
+    """Create billing terminal records from real POS transactions carrying a till identifier."""
+    discovered = db.execute(
+        select(
+            POSTransaction.connection_id,
+            POSTransaction.branch_name,
+            POSTransaction.till_name,
+        )
+        .join(POSConnection, POSConnection.id == POSTransaction.connection_id)
+        .where(
+            POSTransaction.business_id == business_id,
+            POSConnection.business_id == business_id,
+            POSConnection.status != "disabled",
+            POSTransaction.till_name.is_not(None),
+            func.trim(POSTransaction.till_name) != "",
+        )
+        .distinct()
+    ).all()
+    created = 0
+    for connection_id, branch_name, till_name in discovered:
+        branch = (branch_name or "").strip() or None
+        till = till_name.strip()
+        # Stable per-connection + branch + till key. Till labels alone are not globally unique.
+        identity = f"{connection_id}|{branch or ''}|{till}".casefold()
+        external_id = "AUTO-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        existing = db.scalar(
+            select(BusinessPOSTerminal).where(
+                BusinessPOSTerminal.business_id == business_id,
+                BusinessPOSTerminal.external_terminal_id == external_id,
+            )
+        )
+        if existing:
+            # A previously discovered till remains active while its POS connection is enabled.
+            if existing.connection_id == connection_id:
+                existing.status = "active"
+                existing.display_name = till[:160]
+                existing.branch_name = branch[:160] if branch else None
+            continue
+        db.add(BusinessPOSTerminal(
+            business_id=business_id,
+            connection_id=connection_id,
+            external_terminal_id=external_id,
+            display_name=till[:160],
+            branch_name=branch[:160] if branch else None,
+            status="active",
+        ))
+        created += 1
+    if created or discovered:
+        db.flush()
+    return created
+
+
 @router.get("/me")
 def billing_overview(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
     _, business_id = current_business(user, db)
+    sync_discovered_terminals(db, business_id)
     terminals = db.scalars(
         select(BusinessPOSTerminal).where(BusinessPOSTerminal.business_id == business_id).order_by(BusinessPOSTerminal.created_at.desc())
     ).all()
