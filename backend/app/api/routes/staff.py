@@ -217,6 +217,8 @@ def accept_invitation(payload: StaffAccept, db: Session = Depends(get_db)):
     if not invite or invite.expires_at <= utc_now():
         raise HTTPException(status_code=400, detail="This invitation is invalid, expired or already used.")
     email = str(payload.email).lower().strip()
+    if invite.email and invite.email.lower() != email:
+        raise HTTPException(status_code=403, detail="Use the email address that received this invitation.")
     user = db.scalar(select(User).where(User.email == email))
     if user:
         if db.scalar(select(Membership).where(Membership.user_id == user.id, Membership.business_id == invite.business_id)):
