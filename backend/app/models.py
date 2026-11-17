@@ -176,7 +176,7 @@ class StaffInvitation(Base):
     business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
     invited_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     email: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
-    phone: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    phone: Mapped[str | None] = mapped_column(String(24), nullable=True, index=True)
     role: Mapped[str] = mapped_column(String(30), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
