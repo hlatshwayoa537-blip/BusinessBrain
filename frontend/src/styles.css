@@ -178,3 +178,18 @@
 .invoice-record-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.invoice-status{font-size:9px;padding:5px 8px;border-radius:20px;background:#263748;color:#b7c8d3;text-transform:capitalize}.invoice-status.paid{background:#123b36;color:#59d9bd}.invoice-status.overdue,.invoice-status.cancelled{background:#40232b;color:#ffadb6}.invoice-status.sent{background:#17344b;color:#9acbff}
 @media(max-width:1000px){.sales-layout,.invoice-layout{grid-template-columns:1fr}}
 @media(max-width:600px){.sales-workspace,.invoice-workspace{padding:16px}.invoice-line-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.invoice-record-main{flex-direction:column}}
+
+
+/* VEXION Daily Business Close */
+.finance-record-list{display:grid;gap:8px;max-height:460px;overflow:auto}
+.finance-record-row{width:100%;display:flex;justify-content:space-between;align-items:center;gap:14px;text-align:left;padding:12px;border:1px solid #203748;border-radius:10px;background:#0c1b29;color:#e9f2f6;cursor:pointer}
+.finance-record-row:hover{border-color:#55d9c0;background:#102632}
+.finance-record-row>span{display:grid;gap:5px;min-width:0}
+.finance-record-row>span:last-child{text-align:right}
+.finance-record-row strong{font-size:12px;text-transform:capitalize}
+.finance-record-row small{font-size:10px;color:#8da4b5}
+.daily-close-detail{margin-top:18px}
+.daily-close-detail .finance-stats{margin-top:14px}
+.daily-close-detail textarea{width:100%;min-height:76px}
+.daily-close-detail .pos-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+@media(max-width:760px){.finance-record-row{align-items:flex-start;flex-direction:column}.finance-record-row>span:last-child{text-align:left}}
