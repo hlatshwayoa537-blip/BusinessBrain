@@ -1,7 +1,11 @@
 import hashlib
+import json
 import logging
+import os
 import secrets
 import smtplib
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from uuid import uuid4
@@ -47,13 +51,42 @@ def require_admin(user: User, db: Session):
     return membership
 
 def send_invite_email(email: str, business_name: str, invite_url: str):
+    subject = f"You have been invited to {business_name} on BusinessBrain"
+    body = (
+        f"You have been invited to join {business_name} on BusinessBrain.\\n\\n"
+        f"Accept your invitation using this secure link (expires in 48 hours):\\n{invite_url}\\n\\n"
+        "If you were not expecting this invitation, you can ignore this email."
+    )
+
+    # Resend uses HTTPS, which is permitted on Render's Free web services.
+    resend_api_key = os.getenv("RESEND_API_KEY", "").strip()
+    resend_from_email = os.getenv("RESEND_FROM_EMAIL", "").strip()
+    if resend_api_key:
+        if not resend_from_email:
+            raise RuntimeError("RESEND_FROM_EMAIL is not configured")
+        payload = json.dumps({"from": resend_from_email, "to": [email], "subject": subject, "text": body}).encode("utf-8")
+        request = urllib.request.Request(
+            "https://api.resend.com/emails", data=payload,
+            headers={"Authorization": "Bearer " + resend_api_key, "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                if response.status not in (200, 201):
+                    raise RuntimeError("Resend returned HTTP " + str(response.status))
+        except urllib.error.HTTPError as exc:
+            logger.error("Resend email API rejected request (http_status=%s)", exc.code)
+            raise RuntimeError("Resend email API returned HTTP " + str(exc.code)) from None
+        return True
+
+    # SMTP fallback for paid hosts that permit SMTP egress.
     if not settings.smtp_host or not settings.smtp_from_email:
         return False
     message = EmailMessage()
-    message["Subject"] = f"You have been invited to {business_name} on BusinessBrain"
+    message["Subject"] = subject
     message["From"] = settings.smtp_from_email
     message["To"] = email
-    message.set_content(f"You have been invited to join {business_name} on BusinessBrain.\n\nAccept your invitation using this secure link (expires in 48 hours):\n{invite_url}\n\nIf you were not expecting this invitation, you can ignore this email.")
+    message.set_content(body)
     with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as server:
         if settings.smtp_use_tls:
             server.starttls()
@@ -61,7 +94,6 @@ def send_invite_email(email: str, business_name: str, invite_url: str):
             server.login(settings.smtp_username, settings.smtp_password)
         server.send_message(message)
     return True
-
 @router.get("")
 def list_staff(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     membership = get_membership(current_user, db)
@@ -97,19 +129,16 @@ def create_invitation(payload: StaffInviteCreate, current_user: User = Depends(g
         sent = send_invite_email(email, business.name, invite_url)
     except Exception:
         logger.exception(
-            "Staff invitation email delivery failed (smtp_host=%s, smtp_port=%s, "
-            "smtp_username_configured=%s, smtp_from_configured=%s, smtp_tls=%s)",
-            settings.smtp_host or "<missing>",
-            settings.smtp_port,
-            bool(settings.smtp_username),
-            bool(settings.smtp_from_email),
-            settings.smtp_use_tls,
+            "Staff invitation email delivery failed (resend_key_configured=%s, resend_from_configured=%s, smtp_host_configured=%s)",
+            bool(os.getenv("RESEND_API_KEY")),
+            bool(os.getenv("RESEND_FROM_EMAIL")),
+            bool(settings.smtp_host),
         )
         db.delete(invite)
         db.commit()
         raise HTTPException(status_code=502, detail="The invitation email could not be sent. Check the email service configuration and try again.")
     if not sent:
-        return {"id": invite.id, "email": email, "role": invite.role, "status": invite.status, "expires_at": invite.expires_at, "email_sent": False, "message": "Invitation saved, but email delivery is not configured. Configure SMTP to send invitation links."}
+        return {"id": invite.id, "email": email, "role": invite.role, "status": invite.status, "expires_at": invite.expires_at, "email_sent": False, "message": "Invitation saved, but email delivery is not configured. Configure Resend (HTTPS) or SMTP to send invitation links."}
     return {"id": invite.id, "email": email, "role": invite.role, "status": invite.status, "expires_at": invite.expires_at, "email_sent": True}
 
 @router.post("/accept", status_code=status.HTTP_201_CREATED)
