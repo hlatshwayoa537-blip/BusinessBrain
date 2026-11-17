@@ -251,6 +251,7 @@ function POSConnectionsWorkspace({session}:{session:AuthData}) {
         {loading?<p className="network-empty">Loading connections…</p>:connections.length===0?<p className="network-empty">No POS systems connected yet. Register your first till to begin setup.</p>:connections.map(item=><article className="pos-connection" key={item.id}><div><strong>{item.display_name}</strong><span>{item.provider_name} · {item.integration_method.replace("_"," ")}</span><small>Last data: {item.last_received_at?new Date(item.last_received_at).toLocaleString("en-ZA"):"No transactions received yet"}</small></div><span className={"pos-status "+item.status}>{item.status}</span><div className="pos-actions"><button type="button" className="network-secondary-button" onClick={()=>void rotate(item.id)} disabled={item.status==="disabled"}>Rotate secret</button><button type="button" className="network-secondary-button" onClick={()=>void disable(item.id)} disabled={item.status==="disabled"}>Disable</button></div></article>)}
       </div>
     </div>
+    <POSCsvImport session={session} connections={connections} onImported={()=>void load()} />
   </section>;
 }
 
