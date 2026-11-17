@@ -9,6 +9,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from uuid import uuid4
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
@@ -24,6 +25,11 @@ from app.models import utc_now
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/staff", tags=["staff management"])
+
+class EmailDeliveryError(RuntimeError):
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
 ALLOWED_ROLES = {"admin", "manager", "employee", "hr"}
 
 class StaffInviteCreate(BaseModel):
@@ -93,14 +99,42 @@ def send_invite_email(email: str, business_name: str, invite_url: str):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+        relay_host = urlsplit(relay_url).hostname or "invalid-url"
+        logger.info("Staff invite email: attempting Gmail relay (host=%s)", relay_host)
         try:
             with urllib.request.urlopen(request, timeout=25) as response:
-                result = json.loads(response.read().decode("utf-8"))
-                if response.status != 200 or not result.get("ok"):
-                    raise RuntimeError("Gmail relay rejected the email request")
+                response_body = response.read().decode("utf-8")
+                try:
+                    result = json.loads(response_body)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    logger.error("Gmail relay returned a non-JSON response (host=%s, http_status=%s)", relay_host, response.status)
+                    raise EmailDeliveryError("GMAIL_RELAY_INVALID_RESPONSE") from None
+                if response.status != 200:
+                    logger.error("Gmail relay returned unexpected HTTP status (host=%s, http_status=%s)", relay_host, response.status)
+                    raise EmailDeliveryError("GMAIL_RELAY_HTTP_" + str(response.status))
+                if not isinstance(result, dict) or result.get("ok") is not True:
+                    relay_error = result.get("error", "unknown") if isinstance(result, dict) else "unknown"
+                    safe_errors = {"unauthorized", "invalid_request", "daily_quota_exceeded", "send_failed"}
+                    reason = relay_error if relay_error in safe_errors else "unknown"
+                    logger.error("Gmail relay rejected invitation (host=%s, reason=%s)", relay_host, reason)
+                    raise EmailDeliveryError("GMAIL_RELAY_" + reason.upper())
         except urllib.error.HTTPError as exc:
-            logger.error("Gmail relay returned HTTP %s", exc.code)
-            raise RuntimeError("Gmail relay returned HTTP " + str(exc.code)) from None
+            logger.error("Gmail relay HTTP error (host=%s, http_status=%s)", relay_host, exc.code)
+            raise EmailDeliveryError("GMAIL_RELAY_HTTP_" + str(exc.code)) from None
+        except urllib.error.URLError as exc:
+            reason_type = type(exc.reason).__name__
+            logger.error("Gmail relay connection failed (host=%s, reason_type=%s)", relay_host, reason_type)
+            code = "GMAIL_RELAY_TIMEOUT" if "timeout" in reason_type.lower() else "GMAIL_RELAY_CONNECTION_ERROR"
+            raise EmailDeliveryError(code) from None
+        except TimeoutError:
+            logger.error("Gmail relay request timed out (host=%s)", relay_host)
+            raise EmailDeliveryError("GMAIL_RELAY_TIMEOUT") from None
+        except EmailDeliveryError:
+            raise
+        except Exception as exc:
+            logger.error("Gmail relay unexpected failure (host=%s, error_type=%s)", relay_host, type(exc).__name__)
+            raise EmailDeliveryError("GMAIL_RELAY_UNEXPECTED_ERROR") from None
+        logger.info("Staff invite email: Gmail relay accepted request (host=%s)", relay_host)
         return True
 
     # SMTP fallback for paid hosts that permit SMTP egress.
@@ -151,17 +185,30 @@ def create_invitation(payload: StaffInviteCreate, current_user: User = Depends(g
     invite_url = f"{base_url}/?staff_invite={raw_token}"
     try:
         sent = send_invite_email(email, business.name, invite_url)
-    except Exception:
-        logger.exception(
-            "Staff invitation email delivery failed (resend_key_configured=%s, resend_from_configured=%s, gmail_relay_configured=%s, smtp_host_configured=%s)",
+    except EmailDeliveryError as exc:
+        logger.error(
+            "Staff invitation email delivery failed (code=%s, resend_key_configured=%s, gmail_url_configured=%s, gmail_secret_configured=%s, smtp_host_configured=%s)",
+            exc.code,
             bool(os.getenv("RESEND_API_KEY")),
-            bool(os.getenv("RESEND_FROM_EMAIL")),
-            bool(os.getenv("GMAIL_APPS_SCRIPT_URL") and os.getenv("GMAIL_APPS_SCRIPT_SECRET")),
+            bool(os.getenv("GMAIL_APPS_SCRIPT_URL")),
+            bool(os.getenv("GMAIL_APPS_SCRIPT_SECRET")),
             bool(settings.smtp_host),
         )
         db.delete(invite)
         db.commit()
-        raise HTTPException(status_code=502, detail="The invitation email could not be sent. Check the email service configuration and try again.")
+        raise HTTPException(status_code=502, detail=f"The invitation email could not be sent ({exc.code}).")
+    except Exception as exc:
+        logger.exception(
+            "Staff invitation email delivery failed unexpectedly (error_type=%s, resend_key_configured=%s, gmail_url_configured=%s, gmail_secret_configured=%s, smtp_host_configured=%s)",
+            type(exc).__name__,
+            bool(os.getenv("RESEND_API_KEY")),
+            bool(os.getenv("GMAIL_APPS_SCRIPT_URL")),
+            bool(os.getenv("GMAIL_APPS_SCRIPT_SECRET")),
+            bool(settings.smtp_host),
+        )
+        db.delete(invite)
+        db.commit()
+        raise HTTPException(status_code=502, detail="The invitation email could not be sent (EMAIL_DELIVERY_UNEXPECTED_ERROR).")
     if not sent:
         return {"id": invite.id, "email": email, "role": invite.role, "status": invite.status, "expires_at": invite.expires_at, "email_sent": False, "message": "Invitation saved, but email delivery is not configured. Configure the Gmail Apps Script relay, Resend (HTTPS), or SMTP to send invitation links."}
     return {"id": invite.id, "email": email, "role": invite.role, "status": invite.status, "expires_at": invite.expires_at, "email_sent": True}
