@@ -495,6 +495,97 @@ function InvoiceWorkspace({session}:{session:AuthData}) {
 }
 
 
+
+type BillingOverview = {
+  currency: string;
+  subscription_status: string;
+  payment_status: string;
+  active_pos_terminals: number;
+  inactive_pos_terminals: number;
+  verified_direct_referrals: number;
+  referral_discount_eligible: boolean;
+  unit_price_per_pos_month: string;
+  estimated_monthly_total: string;
+  standard_unit_price: string;
+  referral_unit_price: string;
+  notice: string;
+  terminals: {id:string;external_terminal_id:string;display_name:string;branch_name?:string|null;status:string;created_at:string}[];
+};
+
+function BillingWorkspace({session}:{session:AuthData}) {
+  const [data,setData]=useState<BillingOverview|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const [message,setMessage]=useState("");
+  const [terminalId,setTerminalId]=useState("");
+  const [terminalName,setTerminalName]=useState("");
+  const [branchName,setBranchName]=useState("");
+
+  async function request(path:string,method="GET",body?:unknown) {
+    const response=await fetch(API_BASE+path,{method,headers:{Authorization:"Bearer "+session.access_token,...(body?{"Content-Type":"application/json"}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    const result=await response.json();
+    if(!response.ok) throw new Error(result.detail||"Billing request failed.");
+    return result;
+  }
+  async function load() {
+    setLoading(true);setError("");
+    try {setData(await request("/billing/me") as BillingOverview);}
+    catch(err) {setError(err instanceof Error?err.message:"Billing information could not be loaded.");}
+    finally {setLoading(false);}
+  }
+  useEffect(()=>{void load();},[session.access_token]);
+
+  async function registerTerminal(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();setBusy(true);setError("");setMessage("");
+    try {
+      await request("/billing/terminals","POST",{external_terminal_id:terminalId.trim(),display_name:terminalName.trim(),branch_name:branchName.trim()||null});
+      setTerminalId("");setTerminalName("");setBranchName("");
+      setMessage("POS terminal registered. Your estimate has been refreshed.");
+      await load();
+    } catch(err) {setError(err instanceof Error?err.message:"POS terminal could not be registered.");}
+    finally {setBusy(false);}
+  }
+  async function setTerminalStatus(id:string,status:"active"|"inactive") {
+    setError("");setMessage("");
+    try {await request("/billing/terminals/"+id,"PATCH",{status});setMessage("POS terminal status updated.");await load();}
+    catch(err) {setError(err instanceof Error?err.message:"POS terminal status could not be updated.");}
+  }
+  const money=(value:string)=>"R "+Number(value).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});
+
+  return <section className="billing-workspace" id="billing">
+    <div className="profile-centre-heading"><div><div className="eyebrow">VEXION SUBSCRIPTION</div><h2>POS-based pricing and subscription overview.</h2><p>Track registered tills and see the estimated monthly price for your business.</p></div><span className="profile-status">Payment setup pending</span></div>
+    {error&&<p className="finance-alert" role="alert">{error}</p>}{message&&<p className="finance-success" role="status">{message}</p>}
+    {loading?<p className="network-empty">Loading billing overview…</p>:data&&<>
+      <div className="billing-stats">
+        <article><span>Active registered POS</span><strong>{data.active_pos_terminals}</strong><small>{data.inactive_pos_terminals} inactive</small></article>
+        <article><span>Price per POS / month</span><strong>{money(data.unit_price_per_pos_month)}</strong><small>{data.referral_discount_eligible?"Five direct paid referrals verified":"Standard monthly price"}</small></article>
+        <article><span>Estimated monthly total</span><strong>{money(data.estimated_monthly_total)}</strong><small>Based on active registered POS</small></article>
+        <article><span>Verified referrals</span><strong>{data.verified_direct_referrals} / 5</strong><small>{data.referral_discount_eligible?"Referral price unlocked":"Five paying referrals required"}</small></article>
+      </div>
+      <div className="billing-price-note"><strong>Pricing rules</strong><span>R499 per active POS terminal each month. After five directly referred businesses have verified paid subscriptions, your rate becomes R399 per active POS terminal each month.</span></div>
+      <div className="billing-columns">
+        <form className="finance-form" onSubmit={registerTerminal}>
+          <div className="recruitment-card-heading"><div><span className="eyebrow">POS REGISTER</span><h3>Add a POS terminal</h3></div></div>
+          <label>Terminal / till ID<input required minLength={1} maxLength={180} value={terminalId} onChange={e=>setTerminalId(e.target.value)} placeholder="e.g. TILL-01 or POS serial number"/></label>
+          <label>Display name<input required minLength={2} maxLength={160} value={terminalName} onChange={e=>setTerminalName(e.target.value)} placeholder="e.g. Front counter"/></label>
+          <label>Branch / location (optional)<input maxLength={160} value={branchName} onChange={e=>setBranchName(e.target.value)} placeholder="e.g. Durban branch"/></label>
+          <button className="auth-submit" type="submit" disabled={busy}>{busy?"Registering…":"Register POS terminal"} <ArrowUpRight size={16}/></button>
+          <p className="finance-disclaimer">Only register genuine POS terminals belonging to this business. This list is currently maintained manually; it is not yet automatically discovered from a POS provider.</p>
+        </form>
+        <div className="billing-terminal-list">
+          <div className="recruitment-card-heading"><div><span className="eyebrow">REGISTERED EQUIPMENT</span><h3>Your POS terminals</h3></div><button type="button" className="network-secondary-button" onClick={()=>void load()}>Refresh</button></div>
+          {data.terminals.length===0?<p className="network-empty">No POS terminals registered yet. Add each genuine till to calculate your estimate.</p>:data.terminals.map(terminal=><article className="billing-terminal" key={terminal.id}>
+            <div><strong>{terminal.display_name}</strong><span>{terminal.external_terminal_id}{terminal.branch_name?" · "+terminal.branch_name:""}</span></div>
+            <div className="billing-terminal-actions"><span className={"billing-terminal-status "+terminal.status}>{terminal.status}</span><button type="button" className="network-secondary-button" onClick={()=>void setTerminalStatus(terminal.id,terminal.status==="active"?"inactive":"active")}>{terminal.status==="active"?"Deactivate":"Activate"}</button></div>
+          </article>)}
+        </div>
+      </div>
+      <div className="billing-payment-note"><strong>Subscription not activated</strong><p>{data.notice}</p><span>Online payments, invoices for subscriptions and automatic POS discovery will be added in later releases. No money is collected through this page.</span></div>
+    </>}
+  </section>;
+}
+
 type ReferralDashboardData = {
   referral_code: string;
   registered_referrals: number;
@@ -993,7 +1084,7 @@ export default function App() {
       <a className="brand" href="/" aria-label="VEXION home"><div className="brand-mark"><Activity size={22}/></div><span>VEXION</span></a>
       <div className="workspace-label">WORKSPACE</div>
       <div className="workspace-switch"><span className="workspace-icon">{session.business.profile_image_data_url ? <img src={session.business.profile_image_data_url} alt="Business profile"/> : <Building2 size={17}/>}</span><span><strong>{session.business.name}</strong><small>{session.business.industry}</small></span><ChevronRight size={16}/></div>
-      <nav className="navigation" aria-label="Main navigation"><a className="nav-item active" href="#overview"><LayoutDashboard size={18}/>Overview</a><a className="nav-item" href="#pos-connections"><Activity size={18}/>POS Connections</a><a className="nav-item" href="#sales-intelligence"><ChartNoAxesCombined size={18}/>Sales Intelligence</a><a className="nav-item" href="#invoices"><FileText size={18}/>Invoices</a><a className="nav-item" href="#finance"><CreditCard size={18}/>Expenses & Profit</a><a className="nav-item" href="#referrals"><Users size={18}/>Refer & Earn</a><a className="nav-item" href="#customers"><Users size={18}/>Customers</a><a className="nav-item" href="#operations"><Package size={18}/>Operations</a><a className="nav-item" href="#team"><Users size={18}/>Team Management</a><a className="nav-item" href="#people"><BriefcaseBusiness size={18}/>People & HR</a><a className="nav-item" href="#business-profile"><Building2 size={18}/>Business Profile</a><a className="nav-item" href="#network"><Building2 size={18}/>Business Network</a><a className="nav-item" href="#private-conversations"><LockKeyhole size={18}/>Private Conversations</a></nav>
+      <nav className="navigation" aria-label="Main navigation"><a className="nav-item active" href="#overview"><LayoutDashboard size={18}/>Overview</a><a className="nav-item" href="#pos-connections"><Activity size={18}/>POS Connections</a><a className="nav-item" href="#sales-intelligence"><ChartNoAxesCombined size={18}/>Sales Intelligence</a><a className="nav-item" href="#invoices"><FileText size={18}/>Invoices</a><a className="nav-item" href="#finance"><CreditCard size={18}/>Expenses & Profit</a><a className="nav-item" href="#billing"><CreditCard size={18}/>Billing & POS Pricing</a><a className="nav-item" href="#referrals"><Users size={18}/>Refer & Earn</a><a className="nav-item" href="#customers"><Users size={18}/>Customers</a><a className="nav-item" href="#operations"><Package size={18}/>Operations</a><a className="nav-item" href="#team"><Users size={18}/>Team Management</a><a className="nav-item" href="#people"><BriefcaseBusiness size={18}/>People & HR</a><a className="nav-item" href="#business-profile"><Building2 size={18}/>Business Profile</a><a className="nav-item" href="#network"><Building2 size={18}/>Business Network</a><a className="nav-item" href="#private-conversations"><LockKeyhole size={18}/>Private Conversations</a></nav>
       <div className="sidebar-bottom"><a className="nav-item" href="#settings"><Settings2 size={18}/>Settings</a><a className="nav-item" href="#help"><CircleHelp size={18}/>Help & support</a><button className="nav-item signout-button" onClick={signOut}><LogOut size={18}/>Sign out</button><div className="security-note"><ShieldCheck size={17}/><span>Designed with business data security at its core.</span></div></div>
     </aside>
     <main className="main-content" id="overview">
@@ -1001,6 +1092,7 @@ export default function App() {
       <section className="welcome-section"><div><div className="eyebrow">INTELLIGENCE FOR EVERY BUSINESS.</div><h1>Welcome,<br/><span>{session.user.full_name.split(" ")[0]}.</span></h1><p>Your {session.business.name} workspace is ready for connected sales, financial visibility and smarter growth decisions.</p><div className="workspace-created"><ShieldCheck size={16}/> Business workspace created successfully</div></div><div className="welcome-visual" aria-hidden="true"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="brain-core"><Bot size={52} strokeWidth={1.25}/></div><div className="orbit-dot dot-one"/><div className="orbit-dot dot-two"/><div className="orbit-dot dot-three"/><div className="visual-caption">BUSINESS INTELLIGENCE</div></div></section>
       <POSConnectionsWorkspace session={session} />
       <DailyCloseWorkspace session={session} />
+      <BillingWorkspace session={session} />
       <ReferralWorkspace session={session} />
       <SalesIntelligenceWorkspace session={session} />
       <InvoiceWorkspace session={session} />
