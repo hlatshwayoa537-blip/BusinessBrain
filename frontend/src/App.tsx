@@ -16,7 +16,7 @@ type DealFile = { id: string; deal_room_id: string; uploader_business_id: string
 type AuthData = { access_token: string; user: { id: string; email: string; full_name: string }; business: BusinessProfile & { id: string } };
 const STORAGE_KEY = "businessbrain.session";
 const modules = [
-  { icon: ChartNoAxesCombined, title: "Financial Intelligence", detail: "Understand your business finances", tag: "Coming next" },
+  { icon: ChartNoAxesCombined, title: "Financial Intelligence", detail: "Understand your business finances", tag: "Available" },
   { icon: FileText, title: "Invoices & Quotes", detail: "Create and manage business documents", tag: "Planned" },
   { icon: Users, title: "Customers & CRM", detail: "Build stronger customer relationships", tag: "Planned" },
   { icon: Package, title: "Inventory & Procurement", detail: "Keep stock and suppliers in view", tag: "Planned" },
@@ -102,6 +102,87 @@ function PublicCareers() {
     </main>
     <footer className="careers-footer">BusinessBrain © 2026 · Connecting people with opportunity.</footer>
   </div>;
+}
+
+
+type FinanceRecord = { id: string; kind: "income" | "expense"; category: string; description: string; amount: string; currency: string; status: "paid" | "unpaid"; occurred_on: string; reference?: string | null; notes?: string | null };
+type FinanceSummary = { year: number; currency: string; income_total: string; expense_total: string; net_total: string; outstanding_income: string; unpaid_expenses: string; transaction_count: number; months: {month:number;income:string;expenses:string}[] };
+
+function FinanceWorkspace({ session }: { session: AuthData }) {
+  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,10);
+  const [records, setRecords] = useState<FinanceRecord[]>([]);
+  const [summary, setSummary] = useState<FinanceSummary | null>(null);
+  const [kindFilter, setKindFilter] = useState("all");
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [kind, setKind] = useState<"income"|"expense">("income");
+  const [category, setCategory] = useState("Sales");
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [status, setStatus] = useState<"paid"|"unpaid">("paid");
+  const [occurredOn, setOccurredOn] = useState(today);
+  const [reference, setReference] = useState("");
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  async function request(path: string, method = "GET", body?: unknown) {
+    const response = await fetch(API_BASE + path, { method, headers: { Authorization: "Bearer " + session.access_token, ...(body ? {"Content-Type":"application/json"} : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    if (response.status === 204) return null;
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "Finance request failed.");
+    return data;
+  }
+  async function loadFinance() {
+    setLoading(true); setError("");
+    try {
+      const [rows, totals] = await Promise.all([request("/finance/transactions?year=" + year + (kindFilter === "all" ? "" : "&kind=" + kindFilter)), request("/finance/summary?year=" + year)]);
+      setRecords(rows as FinanceRecord[]); setSummary(totals as FinanceSummary);
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not load financial records."); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { void loadFinance(); }, [session.access_token, year, kindFilter]);
+  async function addRecord(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy(true); setMessage(""); setError("");
+    try {
+      await request("/finance/transactions", "POST", {kind,category,description,amount,status,occurred_on:occurredOn,reference:reference||null,notes:notes||null});
+      setDescription(""); setAmount(""); setReference(""); setNotes(""); setMessage("Financial record saved."); await loadFinance();
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not save this record."); }
+    finally { setBusy(false); }
+  }
+  async function deleteRecord(record: FinanceRecord) {
+    if (!window.confirm("Delete this financial record? This cannot be undone.")) return;
+    setError(""); setMessage("");
+    try { await request("/finance/transactions/" + record.id, "DELETE"); setMessage("Record deleted."); await loadFinance(); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not delete this record."); }
+  }
+  const money = (value: string | number) => "R " + Number(value).toLocaleString("en-ZA", {minimumFractionDigits:2,maximumFractionDigits:2});
+  const maxMonth = Math.max(1, ...(summary?.months ?? []).flatMap(item => [Number(item.income), Number(item.expenses)]));
+  return <section className="finance-centre" id="finance">
+    <div className="profile-centre-heading"><div><div className="eyebrow">FINANCIAL INTELLIGENCE</div><h2>Know where your business stands.</h2><p>Track real income and expenses, monitor outstanding amounts and review your monthly position.</p></div><span className="profile-status">Private financial workspace</span></div>
+    <div className="finance-toolbar"><label>Reporting year<select value={year} onChange={e=>setYear(Number(e.target.value))}>{[new Date().getFullYear(),new Date().getFullYear()-1,new Date().getFullYear()-2].map(value=><option key={value} value={value}>{value}</option>)}</select></label><button type="button" className="network-secondary-button" onClick={()=>void loadFinance()}>Refresh records</button></div>
+    {error && <p className="finance-alert" role="alert">{error}</p>}{message && <p className="finance-success" role="status">{message}</p>}
+    <div className="finance-stats"><article><span>Income received</span><strong>{money(summary?.income_total ?? 0)}</strong><small>Paid income recorded</small></article><article><span>Expenses paid</span><strong>{money(summary?.expense_total ?? 0)}</strong><small>Paid expenses recorded</small></article><article><span>Net cash position</span><strong className={Number(summary?.net_total ?? 0)>=0?"finance-positive":"finance-negative"}>{money(summary?.net_total ?? 0)}</strong><small>Income less paid expenses</small></article><article><span>Outstanding income</span><strong>{money(summary?.outstanding_income ?? 0)}</strong><small>Income marked unpaid</small></article></div>
+    <div className="finance-layout">
+      <form className="finance-form" onSubmit={addRecord}><div className="recruitment-card-heading"><div><span className="eyebrow">NEW FINANCIAL RECORD</span><h3>Record income or expense</h3></div></div>
+        <div className="finance-kind-toggle"><button type="button" className={kind==="income"?"selected":""} onClick={()=>setKind("income")}>Income</button><button type="button" className={kind==="expense"?"selected":""} onClick={()=>setKind("expense")}>Expense</button></div>
+        <label>Category<input required minLength={2} maxLength={80} value={category} onChange={e=>setCategory(e.target.value)} placeholder={kind==="income"?"Sales, services…":"Rent, stock, utilities…"}/></label>
+        <label>Description<input required minLength={2} maxLength={240} value={description} onChange={e=>setDescription(e.target.value)} placeholder="What was this payment for?"/></label>
+        <div className="finance-form-row"><label>Amount (ZAR)<input required type="number" min="0.01" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0.00"/></label><label>Date<input required type="date" value={occurredOn} onChange={e=>setOccurredOn(e.target.value)}/></label></div>
+        <div className="finance-form-row"><label>Payment status<select value={status} onChange={e=>setStatus(e.target.value as "paid"|"unpaid")}><option value="paid">Paid</option><option value="unpaid">Unpaid / outstanding</option></select></label><label>Reference (optional)<input maxLength={100} value={reference} onChange={e=>setReference(e.target.value)} placeholder="Receipt / invoice no."/></label></div>
+        <label>Notes (optional)<textarea rows={3} maxLength={2000} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Additional details…"/></label>
+        <button className="auth-submit" type="submit" disabled={busy}>{busy?"Saving record…":"Save financial record"} <ArrowUpRight size={16}/></button>
+        <p className="finance-disclaimer">Only owners and administrators can add or delete records. Figures are based only on records entered here.</p>
+      </form>
+      <div className="finance-report"><div className="recruitment-card-heading"><div><span className="eyebrow">MONTHLY CASH MOVEMENT</span><h3>{year} overview</h3></div><span className="module-count">{summary?.transaction_count ?? 0} RECORDS</span></div>
+        <div className="finance-chart">{(summary?.months ?? []).map(item=><div className="finance-month" key={item.month}><div className="finance-bars"><span title={"Income "+money(item.income)} style={{height:Math.max(2,Number(item.income)/maxMonth*100)+"%"}}/><span title={"Expenses "+money(item.expenses)} style={{height:Math.max(2,Number(item.expenses)/maxMonth*100)+"%"}}/></div><small>{new Date(year,item.month-1,1).toLocaleString("en-ZA",{month:"short"})}</small></div>)}</div>
+        <div className="finance-legend"><span><i className="income-dot"/>Income</span><span><i className="expense-dot"/>Expenses</span></div><div className="finance-outstanding"><span>Unpaid expenses</span><strong>{money(summary?.unpaid_expenses ?? 0)}</strong></div>
+      </div>
+    </div>
+    <div className="finance-records"><div className="recruitment-card-heading"><div><span className="eyebrow">YOUR BOOKKEEPING</span><h3>Financial records</h3></div><select aria-label="Filter financial records" value={kindFilter} onChange={e=>setKindFilter(e.target.value)}><option value="all">All records</option><option value="income">Income only</option><option value="expense">Expenses only</option></select></div>
+      {loading?<p className="network-empty">Loading financial records…</p>:records.length===0?<p className="network-empty">No financial records for this year yet. Add your first income or expense above.</p>:<div className="finance-record-list">{records.map(record=><article className="finance-record" key={record.id}><div className={"finance-record-icon "+record.kind}>{record.kind==="income"?"↗":"↘"}</div><div className="finance-record-info"><strong>{record.description}</strong><span>{record.category} · {new Date(record.occurred_on+"T12:00:00").toLocaleDateString("en-ZA")} · {record.reference||"No reference"}</span></div><div className="finance-record-value"><strong>{money(record.amount)}</strong><small className={"finance-record-status "+record.status}>{record.status}</small></div><button type="button" className="network-secondary-button" onClick={()=>void deleteRecord(record)}>Delete</button></article>)}</div>}
+    </div>
+  </section>;
 }
 
 export default function App() {
@@ -550,6 +631,7 @@ export default function App() {
     <main className="main-content" id="overview">
       <header className="topbar"><div className="breadcrumb">Workspace <ChevronRight size={14}/> <strong>Overview</strong></div><div className="topbar-actions"><span className={`api-indicator ${apiStatus}`}><i/>{apiStatus === "online" ? "API connected" : "API offline"}</span><button className="icon-button" aria-label="Security status"><LockKeyhole size={18}/></button><div className="avatar">{session.user.full_name.split(" ").map(x=>x[0]).slice(0,2).join("").toUpperCase()}</div></div></header>
       <section className="welcome-section"><div><div className="eyebrow">YOUR BUSINESS. ONE INTELLIGENT BRAIN.</div><h1>Welcome,<br/><span>{session.user.full_name.split(" ")[0]}.</span></h1><p>Your {session.business.name} workspace has been created. This is the foundation for bringing your business operations and intelligence together.</p><div className="workspace-created"><ShieldCheck size={16}/> Business workspace created successfully</div></div><div className="welcome-visual" aria-hidden="true"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="brain-core"><Bot size={52} strokeWidth={1.25}/></div><div className="orbit-dot dot-one"/><div className="orbit-dot dot-two"/><div className="orbit-dot dot-three"/><div className="visual-caption">BUSINESS INTELLIGENCE</div></div></section>
+      <FinanceWorkspace session={session} />
       <section className="profile-centre" id="business-profile">
         <div className="profile-centre-heading"><div><div className="eyebrow">BUSINESS IDENTITY</div><h2>Business Profile & Onboarding</h2><p>Complete your business details. You control what information is shared publicly later.</p></div><span className="profile-status">Editable anytime</span></div>
         <form className="business-profile-form" onSubmit={saveBusinessProfile}>
