@@ -13,6 +13,7 @@ from app.api.routes.quotations import router as quotations_router
 from app.api.routes.deal_files import router as deal_files_router
 from app.api.routes.recruitment import router as recruitment_router
 from app.api.routes.staff import router as staff_router
+from app.api.routes.finance import router as finance_router
 from app.core.config import settings
 
 
@@ -50,6 +51,7 @@ app.include_router(quotations_router, prefix=settings.api_v1_prefix)
 app.include_router(deal_files_router, prefix=settings.api_v1_prefix)
 app.include_router(recruitment_router, prefix=settings.api_v1_prefix)
 app.include_router(staff_router, prefix=settings.api_v1_prefix)
+app.include_router(finance_router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/", tags=["system"])
