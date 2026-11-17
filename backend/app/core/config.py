@@ -5,7 +5,7 @@ from pydantic import field_validator
 
 
 class Settings(BaseSettings):
-    app_name: str = "BusinessBrain API"
+    app_name: str = "VEXION API"
     app_env: str = "development"
     api_v1_prefix: str = "/api/v1"
     frontend_origins: str = "http://localhost:5173"

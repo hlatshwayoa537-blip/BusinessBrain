@@ -76,9 +76,9 @@ function PublicCareers() {
   }
 
   return <div className="careers-page">
-    <header className="careers-top"><a className="brand" href="/"><div className="brand-mark"><Activity size={22}/></div><span>Business<span className="brand-accent">Brain</span></span></a><a className="careers-signin" href="/">Business sign in <ArrowUpRight size={15}/></a></header>
+    <header className="careers-top"><a className="brand" href="/"><div className="brand-mark"><Activity size={22}/></div><span>VEXION</span></a><a className="careers-signin" href="/">Business sign in <ArrowUpRight size={15}/></a></header>
     <main className="careers-main">
-      <section className="careers-hero"><div className="eyebrow">BUSINESSBRAIN CAREERS</div><h1>Find your next<br/><span>opportunity.</span></h1><p>Explore roles published by businesses on BusinessBrain. Apply directly without creating a company account.</p><div className="careers-count">{jobs.length} {jobs.length === 1 ? "opportunity" : "opportunities"} currently listed</div></section>
+      <section className="careers-hero"><div className="eyebrow">BUSINESSBRAIN CAREERS</div><h1>Find your next<br/><span>opportunity.</span></h1><p>Explore roles published by businesses on VEXION. Apply directly without creating a company account.</p><div className="careers-count">{jobs.length} {jobs.length === 1 ? "opportunity" : "opportunities"} currently listed</div></section>
       {message && <div className="careers-alert success" role="status">{message}</div>}
       <form className="careers-search" onSubmit={event=>{event.preventDefault();void loadJobs(query);}}><input aria-label="Search vacancies" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search job title, company, department or location"/><button className="auth-submit" type="submit">Search roles <ArrowUpRight size={16}/></button></form>
       {error && <div className="careers-alert" role="alert">{error}</div>}
@@ -93,14 +93,14 @@ function PublicCareers() {
           <label>CV link (optional)<input type="url" maxLength={500} value={form.resume_url} onChange={e=>setForm({...form,resume_url:e.target.value})} placeholder="https://…"/></label>
           <label className="careers-wide">Cover letter / introduction<textarea rows={5} maxLength={5000} value={form.cover_letter} onChange={e=>setForm({...form,cover_letter:e.target.value})} placeholder="Tell the hiring team why you are interested in this role."/></label>
           <label className="careers-honeypot" aria-hidden="true">Leave this field empty<input tabIndex={-1} autoComplete="off" value={form.website} onChange={e=>setForm({...form,website:e.target.value})}/></label>
-          <label className="careers-consent careers-wide"><input required type="checkbox" checked={form.consent_to_share} onChange={e=>setForm({...form,consent_to_share:e.target.checked})}/> I consent to BusinessBrain sharing the information in this application with the business advertising this vacancy for recruitment purposes.</label>
+          <label className="careers-consent careers-wide"><input required type="checkbox" checked={form.consent_to_share} onChange={e=>setForm({...form,consent_to_share:e.target.checked})}/> I consent to VEXION sharing the information in this application with the business advertising this vacancy for recruitment purposes.</label>
           {error && <div className="careers-alert careers-wide" role="alert">{error}</div>}
           <button className="auth-submit careers-wide" type="submit" disabled={submitting || !form.consent_to_share}>{submitting ? "Submitting application…" : "Submit application"} <ArrowUpRight size={16}/></button>
           <p className="careers-privacy careers-wide">Only the hiring business can view your application inside its private recruitment workspace. Do not include sensitive personal information that is not relevant to this role.</p>
         </form>
       </section>}
     </main>
-    <footer className="careers-footer">BusinessBrain © 2026 · Connecting people with opportunity.</footer>
+    <footer className="careers-footer">VEXION © 2026 · Connecting people with opportunity.</footer>
   </div>;
 }
 
@@ -185,6 +185,75 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
   </section>;
 }
 
+
+type POSConnectionData = { id:string; provider_name:string; display_name:string; integration_method:"api"|"webhook"|"local_agent"; status:string; created_at:string; last_received_at?:string|null; webhook_secret?:string };
+type POSSalesData = { days:number; transaction_count:number; sales_total:string; refunds_total:string; net_sales:string; void_count:number };
+function POSConnectionsWorkspace({session}:{session:AuthData}) {
+  const [connections,setConnections] = useState<POSConnectionData[]>([]);
+  const [summary,setSummary] = useState<POSSalesData|null>(null);
+  const [provider,setProvider] = useState("");
+  const [displayName,setDisplayName] = useState("Main till");
+  const [method,setMethod] = useState<"api"|"webhook"|"local_agent">("webhook");
+  const [secret,setSecret] = useState("");
+  const [loading,setLoading] = useState(true);
+  const [busy,setBusy] = useState(false);
+  const [error,setError] = useState("");
+  const [message,setMessage] = useState("");
+  async function request(path:string,methodName="GET",body?:unknown) {
+    const response=await fetch(API_BASE+path,{method:methodName,headers:{Authorization:"Bearer "+session.access_token,...(body?{"Content-Type":"application/json"}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    const data=await response.json();
+    if(!response.ok) throw new Error(data.detail||"VEXION POS request failed.");
+    return data;
+  }
+  async function load() {
+    setLoading(true);setError("");
+    try { const [items,totals]=await Promise.all([request("/pos/connections"),request("/pos/summary?days=7")]);setConnections(items as POSConnectionData[]);setSummary(totals as POSSalesData); }
+    catch(e){setError(e instanceof Error?e.message:"Could not load POS connections.");}
+    finally{setLoading(false);}
+  }
+  useEffect(()=>{void load();},[session.access_token]);
+  async function create(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();setBusy(true);setError("");setMessage("");setSecret("");
+    try {const result=await request("/pos/connections","POST",{provider_name:provider,display_name:displayName,integration_method:method}) as POSConnectionData;setSecret(result.webhook_secret||"");setMessage("Connection created. Copy the secret now; it will not be shown again.");setProvider("");await load();}
+    catch(e){setError(e instanceof Error?e.message:"Could not create POS connection.");}
+    finally{setBusy(false);}
+  }
+  async function rotate(id:string) {
+    setError("");setMessage("");setSecret("");
+    try {const result=await request("/pos/connections/"+id+"/rotate-secret","POST");setSecret(result.webhook_secret);setMessage("A new secret was created. Update your connector; the previous secret is no longer valid.");}
+    catch(e){setError(e instanceof Error?e.message:"Could not rotate connection secret.");}
+  }
+  async function disable(id:string) {
+    if(!window.confirm("Disable this POS connection? New transactions will no longer be accepted."))return;
+    try {await request("/pos/connections/"+id+"/disable","POST");setMessage("POS connection disabled.");await load();}
+    catch(e){setError(e instanceof Error?e.message:"Could not disable connection.");}
+  }
+  const money=(v:string)=>"R "+Number(v).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});
+  return <section className="pos-workspace" id="pos-connections">
+    <div className="profile-centre-heading"><div><div className="eyebrow">VEXION CONNECT</div><h2>Connect your existing POS system.</h2><p>Bring sales from your current tills into one secure business intelligence workspace. No till replacement is required.</p></div><span className="profile-status">POS-agnostic foundation</span></div>
+    <div className="pos-stats">
+      <article><span>Sales received · 7 days</span><strong>{money(summary?.sales_total??"0")}</strong></article>
+      <article><span>Refunds · 7 days</span><strong>{money(summary?.refunds_total??"0")}</strong></article>
+      <article><span>Net sales · 7 days</span><strong>{money(summary?.net_sales??"0")}</strong></article>
+      <article><span>Transactions received</span><strong>{summary?.transaction_count??0}</strong></article>
+    </div>
+    {error&&<p className="finance-alert" role="alert">{error}</p>}{message&&<p className="finance-success" role="status">{message}</p>}
+    {secret&&<div className="pos-secret"><strong>One-time connector secret</strong><p>Copy this into the approved POS connector or integration service. VEXION stores only a one-way hash.</p><code>{secret}</code><button type="button" className="network-secondary-button" onClick={()=>void navigator.clipboard.writeText(secret)}>Copy secret</button></div>}
+    <div className="pos-layout">
+      <form className="finance-form" onSubmit={create}><div className="recruitment-card-heading"><div><span className="eyebrow">NEW CONNECTION</span><h3>Register a POS system</h3></div></div>
+        <label>POS provider / brand<input required minLength={2} maxLength={120} value={provider} onChange={e=>setProvider(e.target.value)} placeholder="e.g. POS provider name"/></label>
+        <label>Connection name<input required minLength={2} maxLength={160} value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="e.g. Durban store · Till 1"/></label>
+        <label>Connection method<select value={method} onChange={e=>setMethod(e.target.value as typeof method)}><option value="webhook">Webhook</option><option value="api">Direct API / integration service</option><option value="local_agent">Local connector agent</option></select></label>
+        <button className="auth-submit" type="submit" disabled={busy}>{busy?"Creating connection…":"Create POS connection"} <ArrowUpRight size={16}/></button>
+        <p className="finance-disclaimer">Creating a connection does not automatically connect a POS vendor. Each provider still needs a tested API, webhook or authorised local connector.</p>
+      </form>
+      <div className="pos-connection-list"><div className="recruitment-card-heading"><div><span className="eyebrow">YOUR INTEGRATIONS</span><h3>POS connections</h3></div><button type="button" className="network-secondary-button" onClick={()=>void load()}>Refresh</button></div>
+        {loading?<p className="network-empty">Loading connections…</p>:connections.length===0?<p className="network-empty">No POS systems connected yet. Register your first till to begin setup.</p>:connections.map(item=><article className="pos-connection" key={item.id}><div><strong>{item.display_name}</strong><span>{item.provider_name} · {item.integration_method.replace("_"," ")}</span><small>Last data: {item.last_received_at?new Date(item.last_received_at).toLocaleString("en-ZA"):"No transactions received yet"}</small></div><span className={"pos-status "+item.status}>{item.status}</span><div className="pos-actions"><button type="button" className="network-secondary-button" onClick={()=>void rotate(item.id)} disabled={item.status==="disabled"}>Rotate secret</button><button type="button" className="network-secondary-button" onClick={()=>void disable(item.id)} disabled={item.status==="disabled"}>Disable</button></div></article>)}
+      </div>
+    </div>
+  </section>;
+}
+
 export default function App() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
   const [session, setSession] = useState<AuthData | null>(readSession);
@@ -264,7 +333,7 @@ export default function App() {
   const staffInviteToken = new URLSearchParams(window.location.search).get("staff_invite") ?? "";
   async function refreshStaff() { if (!session) return; try { const [members, invites] = await Promise.all([networkRequest("/staff"), networkRequest("/staff/invitations")]); setStaff(members); setStaffInvitations(invites); } catch (err) { setStaffMessage(err instanceof Error ? err.message : "Could not load staff."); } }
   useEffect(() => { if (session) void refreshStaff(); }, [session?.access_token]);
-  async function inviteStaff(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setStaffBusy(true); setStaffMessage(""); setStaffWhatsAppUrl(""); try { const result = await networkRequest("/staff/invitations", "POST", { phone: staffPhone, role: staffRole }); const text = `You have been invited to join ${session?.business.name} on BusinessBrain as ${staffRole}. Accept your secure invitation here (expires in 48 hours): ${result.invite_url}`; setStaffWhatsAppUrl("https://wa.me/" + result.phone + "?text=" + encodeURIComponent(text)); setStaffPhone(""); setStaffMessage("Invitation created. Open WhatsApp to send it to your team member."); await refreshStaff(); } catch (err) { setStaffMessage(err instanceof Error ? err.message : "Invitation could not be created."); } finally { setStaffBusy(false); } }
+  async function inviteStaff(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setStaffBusy(true); setStaffMessage(""); setStaffWhatsAppUrl(""); try { const result = await networkRequest("/staff/invitations", "POST", { phone: staffPhone, role: staffRole }); const text = `You have been invited to join ${session?.business.name} on VEXION as ${staffRole}. Accept your secure invitation here (expires in 48 hours): ${result.invite_url}`; setStaffWhatsAppUrl("https://wa.me/" + result.phone + "?text=" + encodeURIComponent(text)); setStaffPhone(""); setStaffMessage("Invitation created. Open WhatsApp to send it to your team member."); await refreshStaff(); } catch (err) { setStaffMessage(err instanceof Error ? err.message : "Invitation could not be created."); } finally { setStaffBusy(false); } }
   async function changeStaffRole(id: string, role: string) { try { await networkRequest("/staff/" + id, "PATCH", { role }); await refreshStaff(); } catch (err) { setStaffMessage(err instanceof Error ? err.message : "Role could not be changed."); } }
   async function removeStaff(id: string) { if (!window.confirm("Remove this staff member access to the business?")) return; try { await networkRequest("/staff/" + id, "DELETE"); await refreshStaff(); } catch (err) { setStaffMessage(err instanceof Error ? err.message : "Staff member could not be removed."); } }
   const [applicantFilter, setApplicantFilter] = useState("all");
@@ -589,16 +658,16 @@ export default function App() {
     catch (err) { setStaffAcceptMessage(err instanceof Error ? err.message : "Invitation could not be accepted."); } finally { setStaffAcceptBusy(false); }
   }
 
-  if (!session && staffInviteToken) return <div className="auth-page"><div className="auth-brand"><div className="brand-mark"><Activity size={22}/></div><span>Business<span className="brand-accent">Brain</span></span></div><section className="auth-card"><div className="auth-card-heading"><h2>Join your business team</h2><p>Complete your staff account using your invitation.</p></div><form className="auth-form" onSubmit={acceptStaffInvite}><label>Your full name<input required minLength={2} maxLength={160} value={staffAcceptName} onChange={e=>setStaffAcceptName(e.target.value)} /></label><p className="auth-footnote">Your WhatsApp number is already linked to this secure invitation. You will use it to sign in.</p><label>Create password<input required type="password" minLength={12} maxLength={128} value={staffAcceptPassword} onChange={e=>setStaffAcceptPassword(e.target.value)} placeholder="At least 12 characters"/></label>{staffAcceptMessage && <div className="auth-warning" role="status">{staffAcceptMessage}</div>}<button className="auth-submit" type="submit" disabled={staffAcceptBusy}>{staffAcceptBusy ? "Joining team…" : "Accept invitation"} <ArrowUpRight size={16}/></button></form><div className="auth-footnote"><LockKeyhole size={14}/> This invitation link is private and expires after 48 hours.</div></section></div>;
+  if (!session && staffInviteToken) return <div className="auth-page"><div className="auth-brand"><div className="brand-mark"><Activity size={22}/></div><span>VEXION</span></div><section className="auth-card"><div className="auth-card-heading"><h2>Join your business team</h2><p>Complete your staff account using your invitation.</p></div><form className="auth-form" onSubmit={acceptStaffInvite}><label>Your full name<input required minLength={2} maxLength={160} value={staffAcceptName} onChange={e=>setStaffAcceptName(e.target.value)} /></label><p className="auth-footnote">Your WhatsApp number is already linked to this secure invitation. You will use it to sign in.</p><label>Create password<input required type="password" minLength={12} maxLength={128} value={staffAcceptPassword} onChange={e=>setStaffAcceptPassword(e.target.value)} placeholder="At least 12 characters"/></label>{staffAcceptMessage && <div className="auth-warning" role="status">{staffAcceptMessage}</div>}<button className="auth-submit" type="submit" disabled={staffAcceptBusy}>{staffAcceptBusy ? "Joining team…" : "Accept invitation"} <ArrowUpRight size={16}/></button></form><div className="auth-footnote"><LockKeyhole size={14}/> This invitation link is private and expires after 48 hours.</div></section></div>;
 
   if (window.location.pathname === "/careers" || window.location.pathname === "/jobs") return <PublicCareers />;
 
   if (!session) return <div className="auth-page">
-    <div className="auth-brand"><div className="brand-mark"><Activity size={22}/></div><span>Business<span className="brand-accent">Brain</span></span></div>
+    <div className="auth-brand"><div className="brand-mark"><Activity size={22}/></div><span>VEXION</span></div>
     <div className="auth-layout">
       <section className="auth-intro">
-        <div className="eyebrow">YOUR BUSINESS. ONE INTELLIGENT BRAIN.</div>
-        <h1>Run your business<br/><span>with clarity.</span></h1>
+        <div className="eyebrow">INTELLIGENCE FOR EVERY BUSINESS.</div>
+        <h1>See your business<br/><span>with clarity.</span></h1>
         <p>Bring your operations, people and business intelligence together in one secure workspace.</p>
         <div className="auth-points"><div><ShieldCheck size={18}/> Built around your business data</div><div><Building2 size={18}/> One workspace for your team</div><div><Bot size={18}/> Intelligence that grows with you</div></div>
       </section>
@@ -611,26 +680,27 @@ export default function App() {
           <label>Password<input required type="password" minLength={mode === "register" ? 12 : 1} maxLength={128} autoComplete={mode === "register" ? "new-password" : "current-password"} value={password} onChange={e=>setPassword(e.target.value)} placeholder={mode === "register" ? "At least 12 characters" : "Your password"}/></label>
           {mode === "register" && <><label>Business name<input required minLength={2} maxLength={200} value={businessName} onChange={e=>setBusinessName(e.target.value)} placeholder="Your registered or trading name"/></label><div className="profile-upload"><div className="profile-upload-preview">{profileImage ? <img src={profileImage} alt="Business profile preview"/> : <Building2 size={25}/>}</div><div className="profile-upload-copy"><strong>Business profile picture</strong><span>Add your company logo or business photo. Optional.</span><label className="profile-upload-button">{profileImage ? "Change image" : "Upload image"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>handleProfileImage(e.target.files?.[0])}/></label>{imageError && <small className="profile-upload-error">{imageError}</small>}</div></div><div className="auth-two-col"><label>Industry<input required minLength={2} maxLength={120} value={industry} onChange={e=>setIndustry(e.target.value)} placeholder="e.g. Retail"/></label><label>Country<select value={country} onChange={e=>setCountry(e.target.value)}><option value="ZA">South Africa</option><option value="NG">Nigeria</option><option value="KE">Kenya</option><option value="GH">Ghana</option><option value="BW">Botswana</option><option value="ZM">Zambia</option><option value="ZW">Zimbabwe</option><option value="OT">Other</option></select></label></div></>}
           {error && <div className="auth-error" role="alert">{error}</div>}
-          {apiStatus === "offline" && <div className="auth-warning">The BusinessBrain API is not reachable yet. Check that the backend is running and try again.</div>}
+          {apiStatus === "offline" && <div className="auth-warning">The VEXION API is not reachable yet. Check that the backend is running and try again.</div>}
           <button className="auth-submit" type="submit" disabled={busy || apiStatus !== "online"}>{busy ? "Please wait…" : mode === "register" ? "Create business workspace" : "Sign in securely"} <ArrowUpRight size={17}/></button>
         </form>
         <div className="auth-footnote"><LockKeyhole size={14}/> Your password is securely hashed. Never share it with anyone.</div><a className="careers-entry-link" href="/careers">Looking for work? Browse open vacancies <ArrowUpRight size={14}/></a>
       </section>
     </div>
-    <footer className="auth-footer">BusinessBrain © 2026 <span>BUILD THE INTELLIGENCE THAT RUNS BUSINESSES.</span></footer>
+    <footer className="auth-footer">VEXION © 2026 <span>BUILD THE INTELLIGENCE THAT RUNS BUSINESSES.</span></footer>
   </div>;
 
   return <div className="app-shell">
     <aside className="sidebar">
-      <a className="brand" href="/" aria-label="BusinessBrain home"><div className="brand-mark"><Activity size={22}/></div><span>Business<span className="brand-accent">Brain</span></span></a>
+      <a className="brand" href="/" aria-label="VEXION home"><div className="brand-mark"><Activity size={22}/></div><span>VEXION</span></a>
       <div className="workspace-label">WORKSPACE</div>
       <div className="workspace-switch"><span className="workspace-icon">{session.business.profile_image_data_url ? <img src={session.business.profile_image_data_url} alt="Business profile"/> : <Building2 size={17}/>}</span><span><strong>{session.business.name}</strong><small>{session.business.industry}</small></span><ChevronRight size={16}/></div>
-      <nav className="navigation" aria-label="Main navigation"><a className="nav-item active" href="#overview"><LayoutDashboard size={18}/>Overview</a><a className="nav-item" href="#finance"><CreditCard size={18}/>Finance</a><a className="nav-item" href="#customers"><Users size={18}/>Customers</a><a className="nav-item" href="#operations"><Package size={18}/>Operations</a><a className="nav-item" href="#team"><Users size={18}/>Team Management</a><a className="nav-item" href="#people"><BriefcaseBusiness size={18}/>People & HR</a><a className="nav-item" href="#business-profile"><Building2 size={18}/>Business Profile</a><a className="nav-item" href="#network"><Building2 size={18}/>Business Network</a><a className="nav-item" href="#private-conversations"><LockKeyhole size={18}/>Private Conversations</a></nav>
+      <nav className="navigation" aria-label="Main navigation"><a className="nav-item active" href="#overview"><LayoutDashboard size={18}/>Overview</a><a className="nav-item" href="#pos-connections"><Activity size={18}/>POS Connections</a><a className="nav-item" href="#finance"><CreditCard size={18}/>Expenses & Profit</a><a className="nav-item" href="#customers"><Users size={18}/>Customers</a><a className="nav-item" href="#operations"><Package size={18}/>Operations</a><a className="nav-item" href="#team"><Users size={18}/>Team Management</a><a className="nav-item" href="#people"><BriefcaseBusiness size={18}/>People & HR</a><a className="nav-item" href="#business-profile"><Building2 size={18}/>Business Profile</a><a className="nav-item" href="#network"><Building2 size={18}/>Business Network</a><a className="nav-item" href="#private-conversations"><LockKeyhole size={18}/>Private Conversations</a></nav>
       <div className="sidebar-bottom"><a className="nav-item" href="#settings"><Settings2 size={18}/>Settings</a><a className="nav-item" href="#help"><CircleHelp size={18}/>Help & support</a><button className="nav-item signout-button" onClick={signOut}><LogOut size={18}/>Sign out</button><div className="security-note"><ShieldCheck size={17}/><span>Designed with business data security at its core.</span></div></div>
     </aside>
     <main className="main-content" id="overview">
       <header className="topbar"><div className="breadcrumb">Workspace <ChevronRight size={14}/> <strong>Overview</strong></div><div className="topbar-actions"><span className={`api-indicator ${apiStatus}`}><i/>{apiStatus === "online" ? "API connected" : "API offline"}</span><button className="icon-button" aria-label="Security status"><LockKeyhole size={18}/></button><div className="avatar">{session.user.full_name.split(" ").map(x=>x[0]).slice(0,2).join("").toUpperCase()}</div></div></header>
-      <section className="welcome-section"><div><div className="eyebrow">YOUR BUSINESS. ONE INTELLIGENT BRAIN.</div><h1>Welcome,<br/><span>{session.user.full_name.split(" ")[0]}.</span></h1><p>Your {session.business.name} workspace has been created. This is the foundation for bringing your business operations and intelligence together.</p><div className="workspace-created"><ShieldCheck size={16}/> Business workspace created successfully</div></div><div className="welcome-visual" aria-hidden="true"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="brain-core"><Bot size={52} strokeWidth={1.25}/></div><div className="orbit-dot dot-one"/><div className="orbit-dot dot-two"/><div className="orbit-dot dot-three"/><div className="visual-caption">BUSINESS INTELLIGENCE</div></div></section>
+      <section className="welcome-section"><div><div className="eyebrow">INTELLIGENCE FOR EVERY BUSINESS.</div><h1>Welcome,<br/><span>{session.user.full_name.split(" ")[0]}.</span></h1><p>Your {session.business.name} workspace is ready for connected sales, financial visibility and smarter growth decisions.</p><div className="workspace-created"><ShieldCheck size={16}/> Business workspace created successfully</div></div><div className="welcome-visual" aria-hidden="true"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="brain-core"><Bot size={52} strokeWidth={1.25}/></div><div className="orbit-dot dot-one"/><div className="orbit-dot dot-two"/><div className="orbit-dot dot-three"/><div className="visual-caption">BUSINESS INTELLIGENCE</div></div></section>
+      <POSConnectionsWorkspace session={session} />
       <FinanceWorkspace session={session} />
       <section className="profile-centre" id="business-profile">
         <div className="profile-centre-heading"><div><div className="eyebrow">BUSINESS IDENTITY</div><h2>Business Profile & Onboarding</h2><p>Complete your business details. You control what information is shared publicly later.</p></div><span className="profile-status">Editable anytime</span></div>
@@ -788,7 +858,7 @@ export default function App() {
                     <button type="button" className="network-secondary-button" onClick={()=>setQuoteLines(current=>[...current,{description:"",quantity:"1",unit_price:"",tax_rate:"15"}])}>+ Add line item</button>
                     <label className="quotation-notes">Notes<textarea rows={2} maxLength={3000} value={quoteNotes} onChange={e=>setQuoteNotes(e.target.value)} placeholder="Payment terms, delivery details or conditions…"/></label>
                     <button className="auth-submit quotation-submit" type="submit">Share quotation in Deal Room <ArrowUpRight size={15}/></button>
-                    <p className="quotation-disclaimer">A quotation response records the business's response in BusinessBrain. It is not a signed contract or legal acceptance of a binding agreement.</p>
+                    <p className="quotation-disclaimer">A quotation response records the business's response in VEXION. It is not a signed contract or legal acceptance of a binding agreement.</p>
                   </form>
                 </div>
 
@@ -798,8 +868,8 @@ export default function App() {
         </div>
       </section>
       <section className="stats-grid" aria-label="Workspace summary"><div className="stat-card"><span className="stat-icon">{session.business.profile_image_data_url ? <img src={session.business.profile_image_data_url} alt="Business profile"/> : <Building2 size={18}/>}</span><span className="stat-label">Business profile</span><strong>Created</strong><small>{session.business.country} · {session.business.industry}</small></div><div className="stat-card"><span className="stat-icon"><Users size={18}/></span><span className="stat-label">Your role</span><strong>Owner</strong><small>Workspace administrator</small></div><div className="stat-card"><span className="stat-icon"><CreditCard size={18}/></span><span className="stat-label">Financial overview</span><strong>Not connected</strong><small>Add records as you get started</small></div><div className="stat-card"><span className="stat-icon"><Activity size={18}/></span><span className="stat-label">System status</span><strong>{apiStatus === "online" ? "Connected" : "Offline"}</strong><small>Backend health check</small></div></section>
-      <section className="modules-section"><div className="section-heading"><div><div className="eyebrow">THE BUSINESS OPERATING SYSTEM</div><h2>Your business, connected.</h2><p>One workspace for the work that moves your business forward.</p></div><span className="module-count">06 CORE MODULES</span></div><div className="module-grid">{modules.map(({icon: Icon,title,detail,tag}) => <article className="module-card" key={title}><div className="module-icon"><Icon size={20}/></div><span className="module-tag">{tag}</span><h3>{title}</h3><p>{detail}</p><span className="module-footer">Part of BusinessBrain <ArrowUpRight size={14}/></span></article>)}</div></section>
-      <footer className="footer"><span>BusinessBrain © 2026</span><span>BUILD THE INTELLIGENCE THAT RUNS BUSINESSES.</span></footer>
+      <section className="modules-section"><div className="section-heading"><div><div className="eyebrow">THE BUSINESS OPERATING SYSTEM</div><h2>Your business, connected.</h2><p>One workspace for the work that moves your business forward.</p></div><span className="module-count">06 CORE MODULES</span></div><div className="module-grid">{modules.map(({icon: Icon,title,detail,tag}) => <article className="module-card" key={title}><div className="module-icon"><Icon size={20}/></div><span className="module-tag">{tag}</span><h3>{title}</h3><p>{detail}</p><span className="module-footer">Part of VEXION <ArrowUpRight size={14}/></span></article>)}</div></section>
+      <footer className="footer"><span>VEXION © 2026</span><span>BUILD THE INTELLIGENCE THAT RUNS BUSINESSES.</span></footer>
     </main>
   </div>;
 }
