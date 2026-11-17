@@ -1,4 +1,6 @@
+import csv
 import hashlib
+import io
 import hmac
 import secrets
 from datetime import date, datetime, time, timedelta, timezone
@@ -275,3 +277,113 @@ def till_sales_analytics(
         item["net_sales"] = item["sales"] - item["refunds"]
         output.append({"branch":item["branch"],"till":item["till"],"net_sales":f"{item['net_sales']:.2f}","transaction_count":item["transaction_count"]})
     return {"currency": currency.upper(), "days": days, "items": sorted(output, key=lambda row: Decimal(row["net_sales"]), reverse=True)}
+
+
+@router.post("/connections/{connection_id}/import-csv")
+def import_csv_transactions(
+    connection_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Import an approved POS CSV export into the same idempotent transaction ledger."""
+    membership = current_membership(user, db)
+    require_admin(membership)
+    connection = db.scalar(select(POSConnection).where(
+        POSConnection.id == connection_id,
+        POSConnection.business_id == membership.business_id,
+    ))
+    if not connection or connection.status == "disabled":
+        raise HTTPException(status_code=404, detail="Active POS connection not found.")
+    csv_text = payload.get("csv_text")
+    mapping = payload.get("mapping")
+    if not isinstance(csv_text, str) or not csv_text.strip():
+        raise HTTPException(status_code=422, detail="Choose a non-empty CSV file.")
+    if len(csv_text.encode("utf-8")) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="CSV files must be 5 MB or smaller.")
+    if not isinstance(mapping, dict):
+        raise HTTPException(status_code=422, detail="Column mapping is required.")
+    required = ("external_transaction_id", "occurred_at", "gross_amount", "net_amount")
+    if any(not isinstance(mapping.get(key), str) or not mapping[key].strip() for key in required):
+        raise HTTPException(status_code=422, detail="Map transaction ID, date/time, gross amount and net amount.")
+    try:
+        reader = csv.DictReader(io.StringIO(csv_text.lstrip("\\ufeff")))
+        headers = reader.fieldnames or []
+        if not headers:
+            raise HTTPException(status_code=422, detail="The CSV file must contain a header row.")
+        if any(column not in headers for column in mapping.values() if column):
+            raise HTTPException(status_code=422, detail="A mapped column is not present in the CSV file.")
+        imported = 0
+        duplicates = 0
+        rejected = []
+        seen = set()
+        for line_number, row in enumerate(reader, start=2):
+            if line_number > 5001:
+                raise HTTPException(status_code=413, detail="A maximum of 5,000 transactions can be imported at once.")
+            if not any((value or "").strip() for value in row.values()):
+                continue
+            try:
+                def value(field, default=None):
+                    column = mapping.get(field)
+                    raw = row.get(column) if column else None
+                    return raw.strip() if isinstance(raw, str) and raw.strip() else default
+                transaction_id = value("external_transaction_id")
+                if not transaction_id:
+                    raise ValueError("Transaction ID is missing.")
+                if transaction_id in seen:
+                    duplicates += 1
+                    continue
+                seen.add(transaction_id)
+                payload_data = {
+                    "external_transaction_id": transaction_id,
+                    "occurred_at": value("occurred_at"),
+                    "transaction_type": (value("transaction_type", "sale") or "sale").lower(),
+                    "currency": (value("currency", "ZAR") or "ZAR").upper(),
+                    "gross_amount": value("gross_amount"),
+                    "discount_amount": value("discount_amount", "0"),
+                    "tax_amount": value("tax_amount", "0"),
+                    "net_amount": value("net_amount"),
+                    "branch_name": value("branch_name"),
+                    "till_name": value("till_name"),
+                    "payment_method": value("payment_method"),
+                }
+                clean = POSIngestTransaction.model_validate(payload_data)
+                exists = db.scalar(select(POSTransaction.id).where(
+                    POSTransaction.connection_id == connection.id,
+                    POSTransaction.external_transaction_id == clean.external_transaction_id,
+                ))
+                if exists:
+                    duplicates += 1
+                    continue
+                occurred_at = clean.occurred_at
+                if occurred_at.tzinfo is None:
+                    occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+                db.add(POSTransaction(
+                    business_id=connection.business_id, connection_id=connection.id,
+                    external_transaction_id=clean.external_transaction_id,
+                    branch_name=clean.branch_name, till_name=clean.till_name,
+                    transaction_type=clean.transaction_type, occurred_at=occurred_at,
+                    currency=clean.currency.upper(), gross_amount=clean.gross_amount,
+                    discount_amount=clean.discount_amount, tax_amount=clean.tax_amount,
+                    net_amount=clean.net_amount, payment_method=clean.payment_method,
+                ))
+                imported += 1
+            except Exception as exc:
+                from pydantic import ValidationError
+                if isinstance(exc, HTTPException):
+                    raise
+                reason = str(exc)
+                if isinstance(exc, ValidationError):
+                    reason = "; ".join(error["msg"] for error in exc.errors())
+                rejected.append({"row": line_number, "reason": reason[:240]})
+        if imported:
+            connection.last_received_at = datetime.now(timezone.utc)
+            connection.status = "active"
+        db.commit()
+        return {"imported": imported, "duplicates": duplicates, "rejected": rejected, "rows_processed": imported + duplicates + len(rejected)}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=422, detail="The CSV could not be processed. Check its delimiter and column headings.") from None

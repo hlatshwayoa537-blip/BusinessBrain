@@ -85,3 +85,42 @@ def test_pos_analytics_report_daily_branch_and_till_performance(client):
     assert tills.status_code == 200
     assert tills.json()["items"][0]["till"] == "Till 03"
     assert tills.json()["items"][0]["net_sales"] == "103.50"
+
+
+def test_csv_import_maps_columns_and_skips_duplicate_transactions(client):
+    headers = auth_headers(client, "pos-csv@example.com")
+    connection = create_pos_connection(client, headers).json()
+    csv_text = (
+        "Receipt,Date,Total,Branch,Till,Method\n"
+        "CSV-100,2026-11-17T10:00:00+02:00,125.50,Durban,02,card\n"
+        "CSV-100,2026-11-17T10:00:00+02:00,125.50,Durban,02,card\n"
+    )
+    mapping = {
+        "external_transaction_id": "Receipt", "occurred_at": "Date",
+        "gross_amount": "Total", "net_amount": "Total",
+        "branch_name": "Branch", "till_name": "Till", "payment_method": "Method",
+    }
+    response = client.post(
+        f"/api/v1/pos/connections/{connection['id']}/import-csv",
+        headers=headers, json={"csv_text": csv_text, "mapping": mapping},
+    )
+    assert response.status_code == 200
+    assert response.json()["imported"] == 1
+    assert response.json()["duplicates"] == 1
+    transactions = client.get("/api/v1/pos/transactions", headers=headers)
+    assert len(transactions.json()) == 1
+    assert transactions.json()[0]["branch_name"] == "Durban"
+
+
+def test_csv_import_rejects_invalid_rows(client):
+    headers = auth_headers(client, "pos-csv-invalid@example.com")
+    connection = create_pos_connection(client, headers).json()
+    response = client.post(
+        f"/api/v1/pos/connections/{connection['id']}/import-csv",
+        headers=headers,
+        json={"csv_text": "ID,Date,Gross,Net\nBAD,not-a-date,abc,xyz\n",
+              "mapping": {"external_transaction_id":"ID","occurred_at":"Date","gross_amount":"Gross","net_amount":"Net"}},
+    )
+    assert response.status_code == 200
+    assert response.json()["imported"] == 0
+    assert len(response.json()["rejected"]) == 1
