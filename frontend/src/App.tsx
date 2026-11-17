@@ -254,6 +254,119 @@ function POSConnectionsWorkspace({session}:{session:AuthData}) {
   </section>;
 }
 
+
+type SalesDailyRow = {date:string;sales:string;refunds:string;net_sales:string;transaction_count:number;void_count:number};
+type SalesBranchRow = {branch:string;sales:string;refunds:string;net_sales:string;transaction_count:number;void_count:number};
+type SalesTillRow = {branch:string;till:string;net_sales:string;transaction_count:number};
+function SalesIntelligenceWorkspace({session}:{session:AuthData}) {
+  const [daily,setDaily]=useState<SalesDailyRow[]>([]);
+  const [branches,setBranches]=useState<SalesBranchRow[]>([]);
+  const [tills,setTills]=useState<SalesTillRow[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState("");
+  async function load(){
+    setLoading(true);setError("");
+    try{
+      const headers={Authorization:"Bearer "+session.access_token};
+      const [d,b,t]=await Promise.all([
+        fetch(API_BASE+"/pos/analytics/daily?days=30&currency=ZAR",{headers}),
+        fetch(API_BASE+"/pos/analytics/branches?days=30&currency=ZAR",{headers}),
+        fetch(API_BASE+"/pos/analytics/tills?days=30&currency=ZAR",{headers})
+      ]);
+      const [dd,bd,td]=await Promise.all([d.json(),b.json(),t.json()]);
+      if(!d.ok)throw new Error(dd.detail||"Could not load daily sales.");
+      if(!b.ok)throw new Error(bd.detail||"Could not load branch sales.");
+      if(!t.ok)throw new Error(td.detail||"Could not load till sales.");
+      setDaily(dd.items as SalesDailyRow[]);setBranches(bd.items as SalesBranchRow[]);setTills(td.items as SalesTillRow[]);
+    }catch(e){setError(e instanceof Error?e.message:"Sales analytics could not be loaded.");}
+    finally{setLoading(false);}
+  }
+  useEffect(()=>{void load();},[session.access_token]);
+  const money=(v:string)=>"R "+Number(v).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const totalSales=daily.reduce((n,x)=>n+Number(x.sales),0);
+  const totalRefunds=daily.reduce((n,x)=>n+Number(x.refunds),0);
+  const maxDaily=Math.max(1,...daily.map(x=>Number(x.net_sales)));
+  return <section className="sales-workspace" id="sales-intelligence">
+    <div className="profile-centre-heading"><div><div className="eyebrow">VEXION SALES INTELLIGENCE</div><h2>Understand how your stores are performing.</h2><p>Review POS-reported sales, refunds, net sales and branch performance across the last 30 days.</p></div><button type="button" className="network-secondary-button" onClick={()=>void load()}>Refresh sales</button></div>
+    <div className="pos-stats"><article><span>Gross POS sales · 30 days</span><strong>{money(totalSales.toFixed(2))}</strong></article><article><span>Refunds · 30 days</span><strong>{money(totalRefunds.toFixed(2))}</strong></article><article><span>Net sales · 30 days</span><strong>{money((totalSales-totalRefunds).toFixed(2))}</strong></article><article><span>POS transactions</span><strong>{daily.reduce((n,x)=>n+x.transaction_count,0).toLocaleString("en-ZA")}</strong></article></div>
+    {error&&<p className="finance-alert" role="alert">{error}</p>}
+    <div className="sales-layout">
+      <div className="sales-panel"><div className="recruitment-card-heading"><div><span className="eyebrow">DAILY TREND</span><h3>Net sales by day</h3></div><span className="module-count">LAST 30 DAYS</span></div>
+        {loading?<p className="network-empty">Loading sales data…</p>:daily.length===0?<p className="network-empty">No POS sales data yet. Connect a till and start receiving transactions to see performance here.</p>:<div className="sales-bars">{daily.map(item=><div className="sales-bar-column" key={item.date}><div className="sales-bar-track"><span style={{height:Math.max(3,Number(item.net_sales)/maxDaily*100)+"%"}} title={money(item.net_sales)}/></div><small>{new Date(item.date+"T12:00:00").toLocaleDateString("en-ZA",{day:"2-digit",month:"short"})}</small></div>)}</div>}
+      </div>
+      <div className="sales-panel"><div className="recruitment-card-heading"><div><span className="eyebrow">BRANCH PERFORMANCE</span><h3>Compare your stores</h3></div></div>
+        {loading?<p className="network-empty">Loading branches…</p>:branches.length===0?<p className="network-empty">Branch comparisons will appear once POS transactions include branch names.</p>:<div className="sales-branch-list">{branches.map(item=><article key={item.branch}><div><strong>{item.branch}</strong><small>{item.transaction_count} transactions · {item.void_count} voids</small></div><b>{money(item.net_sales)}</b></article>)}</div>}
+      </div>
+    </div>
+    <div className="sales-panel sales-tills"><div className="recruitment-card-heading"><div><span className="eyebrow">TILL PERFORMANCE</span><h3>Sales by till</h3></div></div>{loading?<p className="network-empty">Loading tills…</p>:tills.length===0?<p className="network-empty">Till comparisons will appear when POS transactions include till names.</p>:<div className="sales-branch-list">{tills.map((item,index)=><article key={item.branch+"-"+item.till+"-"+index}><div><strong>{item.branch} · {item.till}</strong><small>{item.transaction_count} transactions</small></div><b>{money(item.net_sales)}</b></article>)}</div>}</div>
+  </section>;
+}
+type InvoiceLineDraft = {description:string;quantity:string;unit_price:string;tax_rate:string};
+type InvoiceData = {id:string;invoice_number:string;customer_name:string;customer_email?:string|null;issue_date:string;due_date:string;currency:string;status:string;subtotal:string;tax_total:string;total:string;created_at:string;lines:{description:string;quantity:string;unit_price:string;tax_rate:string;line_total:string}[]};
+function InvoiceWorkspace({session}:{session:AuthData}) {
+  const today=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+  const [invoices,setInvoices]=useState<InvoiceData[]>([]);
+  const [customer,setCustomer]=useState("");
+  const [email,setEmail]=useState("");
+  const [phone,setPhone]=useState("");
+  const [address,setAddress]=useState("");
+  const [issueDate,setIssueDate]=useState(today);
+  const [dueDate,setDueDate]=useState(today);
+  const [currency,setCurrency]=useState("ZAR");
+  const [notes,setNotes]=useState("");
+  const [lines,setLines]=useState<InvoiceLineDraft[]>([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
+  const [loading,setLoading]=useState(true);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const [message,setMessage]=useState("");
+  async function request(path:string,method="GET",body?:unknown){
+    const response=await fetch(API_BASE+path,{method,headers:{Authorization:"Bearer "+session.access_token,...(body?{"Content-Type":"application/json"}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    const data=await response.json();
+    if(!response.ok)throw new Error(data.detail||"Invoice request failed.");
+    return data;
+  }
+  async function load(){setLoading(true);setError("");try{setInvoices(await request("/invoices") as InvoiceData[]);}catch(e){setError(e instanceof Error?e.message:"Invoices could not be loaded.");}finally{setLoading(false);}}
+  useEffect(()=>{void load();},[session.access_token]);
+  function updateLine(index:number,patch:Partial<InvoiceLineDraft>){setLines(current=>current.map((line,i)=>i===index?{...line,...patch}:line));}
+  async function create(event:FormEvent<HTMLFormElement>){
+    event.preventDefault();setBusy(true);setError("");setMessage("");
+    try{
+      const created=await request("/invoices","POST",{customer_name:customer,customer_email:email||null,customer_phone:phone||null,customer_address:address||null,issue_date:issueDate,due_date:dueDate,currency,notes:notes||null,lines}) as InvoiceData;
+      setMessage("Invoice "+created.invoice_number+" created as a draft.");setCustomer("");setEmail("");setPhone("");setAddress("");setNotes("");setLines([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);await load();
+    }catch(e){setError(e instanceof Error?e.message:"Invoice could not be created.");}
+    finally{setBusy(false);}
+  }
+  async function updateStatus(invoice:InvoiceData,status:"sent"|"paid"|"overdue"|"cancelled"){
+    setError("");setMessage("");
+    try{await request("/invoices/"+invoice.id+"/status","PATCH",{status});setMessage(invoice.invoice_number+" marked "+status+".");await load();}
+    catch(e){setError(e instanceof Error?e.message:"Invoice status could not be updated.");}
+  }
+  const preview=lines.reduce((total,line)=>{const subtotal=Number(line.quantity||0)*Number(line.unit_price||0);return total+subtotal+subtotal*Number(line.tax_rate||0)/100;},0);
+  return <section className="invoice-workspace" id="invoices">
+    <div className="profile-centre-heading"><div><div className="eyebrow">VEXION INVOICE CENTRE</div><h2>Create and track professional invoices.</h2><p>Build itemised invoices with VAT, due dates and payment status in one place.</p></div><span className="profile-status">Invoice records</span></div>
+    {error&&<p className="finance-alert" role="alert">{error}</p>}{message&&<p className="finance-success" role="status">{message}</p>}
+    <div className="invoice-layout">
+      <form className="finance-form" onSubmit={create}><div className="recruitment-card-heading"><div><span className="eyebrow">NEW INVOICE</span><h3>Invoice details</h3></div></div>
+        <label>Customer / company<input required minLength={2} maxLength={180} value={customer} onChange={e=>setCustomer(e.target.value)} placeholder="Customer name"/></label>
+        <div className="finance-form-row"><label>Customer email<input type="email" maxLength={320} value={email} onChange={e=>setEmail(e.target.value)} placeholder="accounts@customer.co.za"/></label><label>Customer phone<input type="tel" maxLength={40} value={phone} onChange={e=>setPhone(e.target.value)} placeholder="Optional"/></label></div>
+        <label>Customer address<textarea rows={2} maxLength={2000} value={address} onChange={e=>setAddress(e.target.value)} placeholder="Billing address (optional)"/></label>
+        <div className="finance-form-row"><label>Invoice date<input type="date" required value={issueDate} onChange={e=>setIssueDate(e.target.value)}/></label><label>Due date<input type="date" required min={issueDate} value={dueDate} onChange={e=>setDueDate(e.target.value)}/></label></div>
+        <label>Currency<select value={currency} onChange={e=>setCurrency(e.target.value)}><option value="ZAR">South African rand (ZAR)</option><option value="USD">US dollar (USD)</option><option value="GBP">Pound sterling (GBP)</option><option value="EUR">Euro (EUR)</option></select></label>
+        <div className="invoice-lines-heading"><strong>Invoice items</strong><button type="button" className="network-secondary-button" onClick={()=>setLines(current=>[...current,{description:"",quantity:"1",unit_price:"",tax_rate:"15"}])}>Add item</button></div>
+        {lines.map((line,index)=><div className="invoice-line-editor" key={index}><label>Description<input required minLength={2} maxLength={240} value={line.description} onChange={e=>updateLine(index,{description:e.target.value})} placeholder="Product or service"/></label><div className="invoice-line-fields"><label>Qty<input required type="number" min="0.001" step="0.001" value={line.quantity} onChange={e=>updateLine(index,{quantity:e.target.value})}/></label><label>Unit price<input required type="number" min="0" step="0.01" value={line.unit_price} onChange={e=>updateLine(index,{unit_price:e.target.value})}/></label><label>VAT %<input required type="number" min="0" max="100" step="0.01" value={line.tax_rate} onChange={e=>updateLine(index,{tax_rate:e.target.value})}/></label><button type="button" className="network-secondary-button" disabled={lines.length===1} onClick={()=>setLines(current=>current.filter((_,i)=>i!==index))}>Remove</button></div></div>)}
+        <label>Notes / payment terms<textarea rows={2} maxLength={3000} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Payment instructions or additional notes"/></label>
+        <div className="invoice-preview-total"><span>Estimated total including VAT</span><strong>{currency} {preview.toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></div>
+        <button className="auth-submit" type="submit" disabled={busy}>{busy?"Creating invoice…":"Create draft invoice"} <ArrowUpRight size={16}/></button>
+        <p className="finance-disclaimer">VAT is calculated per line. Creating an invoice does not automatically record income in Expenses & Profit, preventing duplicate revenue.</p>
+      </form>
+      <div className="invoice-list-panel"><div className="recruitment-card-heading"><div><span className="eyebrow">INVOICE REGISTER</span><h3>Your invoices</h3></div><button type="button" className="network-secondary-button" onClick={()=>void load()}>Refresh</button></div>
+        {loading?<p className="network-empty">Loading invoices…</p>:invoices.length===0?<p className="network-empty">No invoices yet. Create your first draft invoice.</p>:invoices.map(invoice=><article className="invoice-record" key={invoice.id}><div className="invoice-record-main"><div><strong>{invoice.invoice_number}</strong><span>{invoice.customer_name} · Due {new Date(invoice.due_date+"T12:00:00").toLocaleDateString("en-ZA")}</span></div><b>{invoice.currency} {Number(invoice.total).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2})}</b></div><div className="invoice-record-actions"><span className={"invoice-status "+invoice.status}>{invoice.status}</span>{invoice.status==="draft"&&<button type="button" className="network-secondary-button" onClick={()=>void updateStatus(invoice,"sent")}>Mark sent</button>}{(invoice.status==="sent"||invoice.status==="overdue")&&<button type="button" className="network-secondary-button" onClick={()=>void updateStatus(invoice,"paid")}>Mark paid</button>}</div><small>{invoice.lines.length} item{invoice.lines.length===1?"":"s"} · Issued {new Date(invoice.issue_date+"T12:00:00").toLocaleDateString("en-ZA")}</small></article>)}
+      </div>
+    </div>
+    <p className="finance-disclaimer">Email delivery and PDF download are not enabled in this release. Invoice creation, VAT calculations and status tracking are live; sending and downloadable document generation are the next invoice-centre steps.</p>
+  </section>;
+}
+
 export default function App() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
   const [session, setSession] = useState<AuthData | null>(readSession);
@@ -694,13 +807,15 @@ export default function App() {
       <a className="brand" href="/" aria-label="VEXION home"><div className="brand-mark"><Activity size={22}/></div><span>VEXION</span></a>
       <div className="workspace-label">WORKSPACE</div>
       <div className="workspace-switch"><span className="workspace-icon">{session.business.profile_image_data_url ? <img src={session.business.profile_image_data_url} alt="Business profile"/> : <Building2 size={17}/>}</span><span><strong>{session.business.name}</strong><small>{session.business.industry}</small></span><ChevronRight size={16}/></div>
-      <nav className="navigation" aria-label="Main navigation"><a className="nav-item active" href="#overview"><LayoutDashboard size={18}/>Overview</a><a className="nav-item" href="#pos-connections"><Activity size={18}/>POS Connections</a><a className="nav-item" href="#finance"><CreditCard size={18}/>Expenses & Profit</a><a className="nav-item" href="#customers"><Users size={18}/>Customers</a><a className="nav-item" href="#operations"><Package size={18}/>Operations</a><a className="nav-item" href="#team"><Users size={18}/>Team Management</a><a className="nav-item" href="#people"><BriefcaseBusiness size={18}/>People & HR</a><a className="nav-item" href="#business-profile"><Building2 size={18}/>Business Profile</a><a className="nav-item" href="#network"><Building2 size={18}/>Business Network</a><a className="nav-item" href="#private-conversations"><LockKeyhole size={18}/>Private Conversations</a></nav>
+      <nav className="navigation" aria-label="Main navigation"><a className="nav-item active" href="#overview"><LayoutDashboard size={18}/>Overview</a><a className="nav-item" href="#pos-connections"><Activity size={18}/>POS Connections</a><a className="nav-item" href="#sales-intelligence"><ChartNoAxesCombined size={18}/>Sales Intelligence</a><a className="nav-item" href="#invoices"><FileText size={18}/>Invoices</a><a className="nav-item" href="#finance"><CreditCard size={18}/>Expenses & Profit</a><a className="nav-item" href="#customers"><Users size={18}/>Customers</a><a className="nav-item" href="#operations"><Package size={18}/>Operations</a><a className="nav-item" href="#team"><Users size={18}/>Team Management</a><a className="nav-item" href="#people"><BriefcaseBusiness size={18}/>People & HR</a><a className="nav-item" href="#business-profile"><Building2 size={18}/>Business Profile</a><a className="nav-item" href="#network"><Building2 size={18}/>Business Network</a><a className="nav-item" href="#private-conversations"><LockKeyhole size={18}/>Private Conversations</a></nav>
       <div className="sidebar-bottom"><a className="nav-item" href="#settings"><Settings2 size={18}/>Settings</a><a className="nav-item" href="#help"><CircleHelp size={18}/>Help & support</a><button className="nav-item signout-button" onClick={signOut}><LogOut size={18}/>Sign out</button><div className="security-note"><ShieldCheck size={17}/><span>Designed with business data security at its core.</span></div></div>
     </aside>
     <main className="main-content" id="overview">
       <header className="topbar"><div className="breadcrumb">Workspace <ChevronRight size={14}/> <strong>Overview</strong></div><div className="topbar-actions"><span className={`api-indicator ${apiStatus}`}><i/>{apiStatus === "online" ? "API connected" : "API offline"}</span><button className="icon-button" aria-label="Security status"><LockKeyhole size={18}/></button><div className="avatar">{session.user.full_name.split(" ").map(x=>x[0]).slice(0,2).join("").toUpperCase()}</div></div></header>
       <section className="welcome-section"><div><div className="eyebrow">INTELLIGENCE FOR EVERY BUSINESS.</div><h1>Welcome,<br/><span>{session.user.full_name.split(" ")[0]}.</span></h1><p>Your {session.business.name} workspace is ready for connected sales, financial visibility and smarter growth decisions.</p><div className="workspace-created"><ShieldCheck size={16}/> Business workspace created successfully</div></div><div className="welcome-visual" aria-hidden="true"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="brain-core"><Bot size={52} strokeWidth={1.25}/></div><div className="orbit-dot dot-one"/><div className="orbit-dot dot-two"/><div className="orbit-dot dot-three"/><div className="visual-caption">BUSINESS INTELLIGENCE</div></div></section>
       <POSConnectionsWorkspace session={session} />
+      <SalesIntelligenceWorkspace session={session} />
+      <InvoiceWorkspace session={session} />
       <FinanceWorkspace session={session} />
       <section className="profile-centre" id="business-profile">
         <div className="profile-centre-heading"><div><div className="eyebrow">BUSINESS IDENTITY</div><h2>Business Profile & Onboarding</h2><p>Complete your business details. You control what information is shared publicly later.</p></div><span className="profile-status">Editable anytime</span></div>

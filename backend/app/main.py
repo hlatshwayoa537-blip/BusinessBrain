@@ -15,6 +15,7 @@ from app.api.routes.recruitment import router as recruitment_router
 from app.api.routes.staff import router as staff_router
 from app.api.routes.finance import router as finance_router
 from app.api.routes.pos import router as pos_router
+from app.api.routes.invoices import router as invoices_router
 from app.core.config import settings
 
 
@@ -42,7 +43,7 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "X-Vexion-Secret"],
 )
 app.include_router(health_router, prefix=settings.api_v1_prefix)
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
@@ -54,6 +55,7 @@ app.include_router(recruitment_router, prefix=settings.api_v1_prefix)
 app.include_router(staff_router, prefix=settings.api_v1_prefix)
 app.include_router(finance_router, prefix=settings.api_v1_prefix)
 app.include_router(pos_router, prefix=settings.api_v1_prefix)
+app.include_router(invoices_router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/", tags=["system"])

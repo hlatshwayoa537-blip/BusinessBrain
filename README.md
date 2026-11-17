@@ -142,3 +142,12 @@ VEXION supports a provider-neutral transaction model. POS providers can connect 
 - `GET /api/v1/pos/summary` — aggregate sales, refunds, voids and net sales.
 
 Connector secrets are stored only as SHA-256 digests and are shown only when created or rotated. Ingestion is idempotent per connection and external transaction ID. POS actuals are kept separate from manually entered finance records to avoid double-counting. The current foundation does not itself provide vendor-specific adapters, CSV upload parsing, item-level stock feeds or a local agent installer.
+
+
+## VEXION sales intelligence and invoices
+
+The POS analytics endpoints provide daily net sales, branch comparisons and till comparisons for a selected currency and date window. Summaries are based only on normalized POS transactions actually received by the business.
+
+The invoice centre creates tenant-scoped draft invoices with up to 50 item lines, server-calculated decimal totals and per-line VAT/tax rates. Invoices can be marked sent, paid, overdue or cancelled. Invoice records are deliberately separate from manual finance income and POS transactions so the same revenue is not automatically counted more than once.
+
+PDF generation, email delivery, customer payment links, credit notes and automatic accounting reconciliation are not included in this phase.

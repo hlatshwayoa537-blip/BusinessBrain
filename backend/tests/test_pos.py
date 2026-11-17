@@ -54,3 +54,34 @@ def test_pos_connections_are_isolated_between_businesses(client):
     assert created.status_code == 201
     assert client.get("/api/v1/pos/connections", headers=other).json() == []
     assert client.get("/api/v1/pos/transactions", headers=other).json() == []
+
+
+def test_pos_analytics_report_daily_branch_and_till_performance(client):
+    from datetime import datetime, timezone
+    headers = auth_headers(client, "pos-analytics@example.com")
+    connection = create_pos_connection(client, headers).json()
+    secret = connection["webhook_secret"]
+    timestamp = datetime.now(timezone.utc).isoformat()
+    base = {
+        "branch_name": "Durban Central", "till_name": "Till 03",
+        "occurred_at": timestamp, "currency": "ZAR", "gross_amount": "115.00",
+        "discount_amount": "0.00", "tax_amount": "15.00", "net_amount": "115.00",
+        "payment_method": "card"
+    }
+    sale = {**base, "external_transaction_id": "ANALYTICS-SALE", "transaction_type": "sale"}
+    refund = {**base, "external_transaction_id": "ANALYTICS-REFUND", "transaction_type": "refund", "gross_amount": "11.50", "tax_amount": "1.50", "net_amount": "11.50"}
+    for payload in (sale, refund):
+        response = client.post(f"/api/v1/pos/ingest/{connection['id']}", headers={"X-Vexion-Secret": secret}, json=payload)
+        assert response.status_code == 201
+    daily = client.get("/api/v1/pos/analytics/daily?days=30", headers=headers)
+    assert daily.status_code == 200
+    assert daily.json()["items"][0]["sales"] == "115.00"
+    assert daily.json()["items"][0]["refunds"] == "11.50"
+    assert daily.json()["items"][0]["net_sales"] == "103.50"
+    branches = client.get("/api/v1/pos/analytics/branches?days=30", headers=headers)
+    assert branches.status_code == 200
+    assert branches.json()["items"][0]["branch"] == "Durban Central"
+    tills = client.get("/api/v1/pos/analytics/tills?days=30", headers=headers)
+    assert tills.status_code == 200
+    assert tills.json()["items"][0]["till"] == "Till 03"
+    assert tills.json()["items"][0]["net_sales"] == "103.50"

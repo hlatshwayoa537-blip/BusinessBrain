@@ -236,3 +236,41 @@ class POSTransaction(Base):
     net_amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
     payment_method: Mapped[str | None] = mapped_column(String(60), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class Invoice(Base):
+    __tablename__ = "invoices"
+    __table_args__ = (UniqueConstraint("business_id", "invoice_number", name="uq_invoice_business_number"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    invoice_number: Mapped[str] = mapped_column(String(40), nullable=False)
+    customer_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    customer_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    customer_phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    customer_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    issue_date: Mapped[date] = mapped_column(Date, nullable=False)
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="ZAR")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft", index=True)
+    subtotal: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    tax_total: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    total: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    lines: Mapped[list["InvoiceLineItem"]] = relationship(back_populates="invoice", cascade="all, delete-orphan", order_by="InvoiceLineItem.id")
+
+
+class InvoiceLineItem(Base):
+    __tablename__ = "invoice_line_items"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    invoice_id: Mapped[str] = mapped_column(ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False, index=True)
+    description: Mapped[str] = mapped_column(String(240), nullable=False)
+    quantity: Mapped[float] = mapped_column(Numeric(12, 3), nullable=False)
+    unit_price: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    tax_rate: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    line_subtotal: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    line_tax: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    line_total: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    invoice: Mapped[Invoice] = relationship(back_populates="lines")
