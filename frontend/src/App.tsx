@@ -175,6 +175,11 @@ export default function App() {
   const [staffRole, setStaffRole] = useState("employee");
   const [staffMessage, setStaffMessage] = useState("");
   const [staffBusy, setStaffBusy] = useState(false);
+  const [staffAcceptBusy, setStaffAcceptBusy] = useState(false);
+  const [staffAcceptMessage, setStaffAcceptMessage] = useState("");
+  const [staffAcceptName, setStaffAcceptName] = useState("");
+  const [staffAcceptPassword, setStaffAcceptPassword] = useState("");
+  const staffInviteToken = new URLSearchParams(window.location.search).get("staff_invite") ?? "";
   async function refreshStaff() { if (!session) return; try { const [members, invites] = await Promise.all([networkRequest("/staff"), networkRequest("/staff/invitations")]); setStaff(members); setStaffInvitations(invites); } catch (err) { setStaffMessage(err instanceof Error ? err.message : "Could not load staff."); } }
   useEffect(() => { if (session) void refreshStaff(); }, [session?.access_token]);
   async function inviteStaff(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setStaffBusy(true); setStaffMessage(""); try { const result = await networkRequest("/staff/invitations", "POST", { email: staffEmail, role: staffRole }); setStaffEmail(""); setStaffMessage(result.email_sent ? "Invitation email sent. The link expires in 48 hours." : result.message); await refreshStaff(); } catch (err) { setStaffMessage(err instanceof Error ? err.message : "Invitation could not be sent."); } finally { setStaffBusy(false); } }
