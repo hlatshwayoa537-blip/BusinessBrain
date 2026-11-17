@@ -35,10 +35,20 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthRes
 
 @router.post("/login", response_model=AuthResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
-    email = str(payload.email).strip().lower()
-    user = db.scalar(select(User).where(User.email == email))
+    identifier = (payload.identifier or (str(payload.email) if payload.email else "")).strip()
+    if not identifier:
+        raise HTTPException(status_code=422, detail="Enter your email address or WhatsApp number.")
+    if "@" in identifier:
+        user = db.scalar(select(User).where(User.email == identifier.lower()))
+    else:
+        phone_digits = "".join(ch for ch in identifier if ch.isdigit())
+        if len(phone_digits) < 8 or len(phone_digits) > 15:
+            raise HTTPException(status_code=401, detail="Incorrect WhatsApp number or password.")
+        candidates = db.scalars(select(User).where(User.phone.is_not(None))).all()
+        matches = [candidate for candidate in candidates if "".join(ch for ch in (candidate.phone or "") if ch.isdigit()) == phone_digits]
+        user = matches[0] if len(matches) == 1 else None
     if not user or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Incorrect email or password.")
+        raise HTTPException(status_code=401, detail="Incorrect email/WhatsApp number or password.")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="This account is disabled.")
     membership = db.scalar(select(Membership).where(Membership.user_id == user.id).order_by(Membership.created_at))

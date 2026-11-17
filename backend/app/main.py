@@ -20,9 +20,12 @@ from app.core.config import settings
 async def lifespan(app: FastAPI):
     # Apply pending schema migrations before accepting requests. Fail startup if
     # the database cannot be migrated so the API never serves against a partial schema.
-    backend_dir = Path(__file__).resolve().parents[1]
-    alembic_config = Config(str(backend_dir / "alembic.ini"))
-    command.upgrade(alembic_config, "head")
+    # Tests use an isolated SQLite database supplied by the test fixtures.
+    # Never run production Alembic migrations against the developer/CI database.
+    if settings.app_env.lower() != "test":
+        backend_dir = Path(__file__).resolve().parents[1]
+        alembic_config = Config(str(backend_dir / "alembic.ini"))
+        command.upgrade(alembic_config, "head")
     yield
 
 

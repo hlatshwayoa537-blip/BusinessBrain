@@ -24,7 +24,9 @@ class RegisterRequest(BaseModel):
         return value
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    # Existing business owners may continue using email; staff can sign in with WhatsApp phone.
+    identifier: str | None = Field(default=None, min_length=3, max_length=320)
+    email: EmailStr | None = None
     password: str = Field(min_length=1, max_length=128)
 
 class UserResponse(BaseModel):
