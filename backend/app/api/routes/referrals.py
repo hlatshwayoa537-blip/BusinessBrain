@@ -4,6 +4,7 @@ import string
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.api.routes.auth import get_current_user
 from app.db import get_db
@@ -33,13 +34,14 @@ def create_referral_code(db: Session, business_id: str) -> BusinessReferralProfi
         try:
             db.flush()
             return profile
-        except Exception:
+        except IntegrityError:
             db.rollback()
-            # A collision is exceptionally unlikely; retry with a fresh random code.
-            if db.get(Business, business_id) is None:
-                raise
+            # Another request may have created this business's code at the same time.
+            existing = db.scalar(select(BusinessReferralProfile).where(BusinessReferralProfile.business_id == business_id))
+            if existing:
+                return existing
+            # Otherwise retry only for the extremely unlikely random-code collision.
     raise HTTPException(status_code=503, detail="Could not generate a referral code. Please try again.")
-
 
 @router.get("/me")
 def my_referrals(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
