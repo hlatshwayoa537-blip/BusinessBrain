@@ -141,6 +141,7 @@ def list_transactions(
 @router.get("/summary", response_model=POSSalesSummary)
 def sales_summary(
     days: int = Query(default=7, ge=1, le=365),
+    currency: str = Query(default="ZAR", pattern="^[A-Za-z]{3}$"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -150,6 +151,7 @@ def sales_summary(
     rows = db.execute(select(POSTransaction.transaction_type, func.sum(POSTransaction.net_amount), func.count(POSTransaction.id)).where(
         POSTransaction.business_id == membership.business_id,
         POSTransaction.occurred_at >= since,
+        POSTransaction.currency == currency.upper(),
     ).group_by(POSTransaction.transaction_type)).all()
     sales = ZERO
     refunds = ZERO
@@ -164,7 +166,7 @@ def sales_summary(
         elif kind == "void":
             void_count += count
     return POSSalesSummary(
-        days=days, transaction_count=transaction_count,
+        currency=currency.upper(), days=days, transaction_count=transaction_count,
         sales_total=f"{sales:.2f}", refunds_total=f"{refunds:.2f}",
         net_sales=f"{sales - refunds:.2f}", void_count=void_count,
     )
