@@ -333,3 +333,35 @@ class BusinessReferral(Base):
     referred_business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending_payment", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class BusinessPOSTerminal(Base):
+    __tablename__ = "business_pos_terminals"
+    __table_args__ = (UniqueConstraint("business_id", "external_terminal_id", name="uq_business_pos_terminal_external_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    connection_id: Mapped[str | None] = mapped_column(ForeignKey("pos_connections.id", ondelete="SET NULL"), nullable=True)
+    external_terminal_id: Mapped[str] = mapped_column(String(180), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    branch_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class BusinessSubscription(Base):
+    __tablename__ = "business_subscriptions"
+    __table_args__ = (UniqueConstraint("business_id", name="uq_business_subscription_business"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="not_started", index=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="ZAR")
+    unit_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=499)
+    discounted_unit_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=399)
+    active_pos_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    referral_discount_applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    payment_provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    provider_customer_reference: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    provider_subscription_reference: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
