@@ -84,15 +84,16 @@ def delete_transaction(
 
 @router.get("/summary", response_model=FinanceSummaryResponse)
 def finance_summary(
-    year: int = Query(default_factory=lambda: date.today().year, ge=2000, le=2100),
+    year: int | None = Query(default=None, ge=2000, le=2100),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     membership = current_membership(user, db)
+    selected_year = year or date.today().year
     records = list(db.scalars(select(FinanceTransaction).where(
         FinanceTransaction.business_id == membership.business_id,
-        FinanceTransaction.occurred_on >= date(year, 1, 1),
-        FinanceTransaction.occurred_on < date(year + 1, 1, 1),
+        FinanceTransaction.occurred_on >= date(selected_year, 1, 1),
+        FinanceTransaction.occurred_on < date(selected_year + 1, 1, 1),
     )).all())
     income = ZERO
     expenses = ZERO
@@ -113,7 +114,7 @@ def finance_summary(
         else:
             unpaid_expenses += amount
     return FinanceSummaryResponse(
-        year=year,
+        year=selected_year,
         income_total=f"{income:.2f}",
         expense_total=f"{expenses:.2f}",
         net_total=f"{income - expenses:.2f}",
