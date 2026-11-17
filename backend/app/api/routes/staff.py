@@ -103,10 +103,16 @@ def accept_invitation(payload: StaffAccept, db: Session = Depends(get_db)):
     if user:
         if not verify_password(payload.password, user.password_hash):
             raise HTTPException(status_code=403, detail="A BusinessBrain account already uses this WhatsApp number. Enter that account password to accept the invitation.")
-        if db.scalar(select(Membership).where(Membership.user_id == user.id, Membership.business_id == invite.business_id)):
-            raise HTTPException(status_code=409, detail="This account already belongs to the business.")
+        existing_membership = db.scalar(select(Membership).where(Membership.user_id == user.id, Membership.business_id == invite.business_id))
         if not user.is_active:
             raise HTTPException(status_code=403, detail="This account is disabled. Contact the business owner.")
+        if existing_membership:
+            # A previous attempt or an earlier owner action may already have added
+            # this account. Treat acceptance as successful without creating a duplicate.
+            invite.status = "accepted"
+            invite.accepted_at = utc_now()
+            db.commit()
+            return {"accepted": True, "already_member": True, "phone": phone, "message": "This account is already a member of the business."}
     else:
         # The database currently requires a unique email. This private, non-deliverable
         # alias preserves that constraint without asking staff for or sending email.
