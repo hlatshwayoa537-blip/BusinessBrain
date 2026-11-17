@@ -5,7 +5,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -166,6 +166,8 @@ def save_daily_close(
         row.pos_transaction_count = len(pos_rows)
         row.notes = payload.notes
         row.status = "draft"
+        row.submitted_by_user_id = None
+        row.submitted_at = None
         row.review_note = None
         row.reviewed_by_user_id = None
         row.reviewed_at = None
