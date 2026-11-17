@@ -12,6 +12,7 @@ class RegisterRequest(BaseModel):
     industry: Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=120)]
     country: Annotated[str, StringConstraints(pattern=r"^[A-Za-z]{2}$")] = "ZA"
     profile_image_data_url: str | None = Field(default=None, max_length=2_800_000)
+    referral_code: str | None = Field(default=None, min_length=4, max_length=20)
 
     @field_validator("profile_image_data_url")
     @classmethod
