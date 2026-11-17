@@ -256,10 +256,10 @@ function POSConnectionsWorkspace({session}:{session:AuthData}) {
 
 
 type SalesDailyRow = {date:string;sales:string;refunds:string;net_sales:string;transaction_count:number;void_count:number};
-type SalesBranchRow = {branch:string;sales:string;refunds:string;net_sales:string;transaction_count:number;void_count:number};
+type SalesBranchRow = {branch:string;sales:string;refunds:string;net_sales:string;transaction_count:number;void_count:number};\ntype SalesTillRow = {branch:string;till:string;net_sales:string;transaction_count:number};
 function SalesIntelligenceWorkspace({session}:{session:AuthData}) {
   const [daily,setDaily]=useState<SalesDailyRow[]>([]);
-  const [branches,setBranches]=useState<SalesBranchRow[]>([]);
+  const [branches,setBranches]=useState<SalesBranchRow[]>([]);\n  const [tills,setTills]=useState<SalesTillRow[]>([]);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState("");
   async function load(){
@@ -294,7 +294,7 @@ function SalesIntelligenceWorkspace({session}:{session:AuthData}) {
         {loading?<p className="network-empty">Loading branches…</p>:branches.length===0?<p className="network-empty">Branch comparisons will appear once POS transactions include branch names.</p>:<div className="sales-branch-list">{branches.map(item=><article key={item.branch}><div><strong>{item.branch}</strong><small>{item.transaction_count} transactions · {item.void_count} voids</small></div><b>{money(item.net_sales)}</b></article>)}</div>}
       </div>
     </div>
-    <div className="sales-panel sales-tills"><div className="recruitment-card-heading"><div><span className="eyebrow">TILL PERFORMANCE</span><h3>Sales by till</h3></div></div><p className="finance-disclaimer">Till-level comparison is available from the transaction feed and will populate when till names are supplied by the POS connector.</p></div>
+    <div className="sales-panel sales-tills"><div className="recruitment-card-heading"><div><span className="eyebrow">TILL PERFORMANCE</span><h3>Sales by till</h3></div></div>{loading?<p className="network-empty">Loading tills…</p>:tills.length===0?<p className="network-empty">Till comparisons will appear when POS transactions include till names.</p>:<div className="sales-branch-list">{tills.map((item,index)=><article key={item.branch+"-"+item.till+"-"+index}><div><strong>{item.branch} · {item.till}</strong><small>{item.transaction_count} transactions</small></div><b>{money(item.net_sales)}</b></article>)}</div>}</div>
   </section>;
 }
 type InvoiceLineDraft = {description:string;quantity:string;unit_price:string;tax_rate:string};
