@@ -32,12 +32,6 @@ class DailyCloseInput(BaseModel):
     expenses_total: Decimal = Field(default=ZERO, ge=0, max_digits=14, decimal_places=2)
     notes: str | None = Field(default=None, max_length=4000)
 
-    @model_validator(mode="after")
-    def validate_manual_expected(self):
-        if any(value is None for value in (self.expected_cash, self.expected_card, self.expected_other)):
-            raise ValueError("Enter all three expected payment totals when no POS transactions are available.")
-        return self
-
 
 class ReviewInput(BaseModel):
     decision: str = Field(pattern=r"^(approved|requires_attention)$")
@@ -149,6 +143,8 @@ def save_daily_close(
         source_type = "pos"
         expected_cash, expected_card, expected_other = expected["cash"], expected["card"], expected["other"]
     else:
+        if any(value is None for value in (payload.expected_cash, payload.expected_card, payload.expected_other)):
+            raise HTTPException(status_code=422, detail="No POS transactions were found for this branch and date. Enter expected cash, card and other totals manually.")
         source_type = "manual"
         expected_cash, expected_card, expected_other = payload.expected_cash, payload.expected_card, payload.expected_other
 
