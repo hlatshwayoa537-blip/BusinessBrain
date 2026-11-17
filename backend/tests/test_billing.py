@@ -124,7 +124,7 @@ def test_billing_discovers_terminals_from_csv_imported_pos_data(client):
     connection = client.post("/api/v1/pos/connections", headers=headers, json={
         "provider_name": "Generic POS", "display_name": "CSV POS", "integration_method": "webhook"
     }).json()
-    csv_text = "Receipt,Date,Total,Branch,Till\\nCSV-TILL-1,2026-11-17T10:00:00+02:00,120.00,Durban,Front\\n"
+    csv_text = "Receipt,Date,Total,Branch,Till\nCSV-TILL-1,2026-11-17T10:00:00+02:00,120.00,Durban,Front\n"
     mapping = {
         "external_transaction_id": "Receipt", "occurred_at": "Date",
         "gross_amount": "Total", "net_amount": "Total",
