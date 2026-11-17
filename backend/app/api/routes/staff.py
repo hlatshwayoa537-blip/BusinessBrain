@@ -79,6 +79,30 @@ def send_invite_email(email: str, business_name: str, invite_url: str):
             raise RuntimeError("Resend email API returned HTTP " + str(exc.code)) from None
         return True
 
+    # Google Apps Script Gmail relay uses HTTPS, so it works on Render Free.
+    relay_url = os.getenv("GMAIL_APPS_SCRIPT_URL", "").strip()
+    relay_secret = os.getenv("GMAIL_APPS_SCRIPT_SECRET", "").strip()
+    if relay_url or relay_secret:
+        if not relay_url or not relay_secret:
+            raise RuntimeError("Gmail Apps Script relay configuration is incomplete")
+        payload = json.dumps({
+            "secret": relay_secret, "to": email, "subject": subject, "text": body
+        }).encode("utf-8")
+        request = urllib.request.Request(
+            relay_url, data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=25) as response:
+                result = json.loads(response.read().decode("utf-8"))
+                if response.status != 200 or not result.get("ok"):
+                    raise RuntimeError("Gmail relay rejected the email request")
+        except urllib.error.HTTPError as exc:
+            logger.error("Gmail relay returned HTTP %s", exc.code)
+            raise RuntimeError("Gmail relay returned HTTP " + str(exc.code)) from None
+        return True
+
     # SMTP fallback for paid hosts that permit SMTP egress.
     if not settings.smtp_host or not settings.smtp_from_email:
         return False
@@ -129,16 +153,17 @@ def create_invitation(payload: StaffInviteCreate, current_user: User = Depends(g
         sent = send_invite_email(email, business.name, invite_url)
     except Exception:
         logger.exception(
-            "Staff invitation email delivery failed (resend_key_configured=%s, resend_from_configured=%s, smtp_host_configured=%s)",
+            "Staff invitation email delivery failed (resend_key_configured=%s, resend_from_configured=%s, gmail_relay_configured=%s, smtp_host_configured=%s)",
             bool(os.getenv("RESEND_API_KEY")),
             bool(os.getenv("RESEND_FROM_EMAIL")),
+            bool(os.getenv("GMAIL_APPS_SCRIPT_URL") and os.getenv("GMAIL_APPS_SCRIPT_SECRET")),
             bool(settings.smtp_host),
         )
         db.delete(invite)
         db.commit()
         raise HTTPException(status_code=502, detail="The invitation email could not be sent. Check the email service configuration and try again.")
     if not sent:
-        return {"id": invite.id, "email": email, "role": invite.role, "status": invite.status, "expires_at": invite.expires_at, "email_sent": False, "message": "Invitation saved, but email delivery is not configured. Configure Resend (HTTPS) or SMTP to send invitation links."}
+        return {"id": invite.id, "email": email, "role": invite.role, "status": invite.status, "expires_at": invite.expires_at, "email_sent": False, "message": "Invitation saved, but email delivery is not configured. Configure the Gmail Apps Script relay, Resend (HTTPS), or SMTP to send invitation links."}
     return {"id": invite.id, "email": email, "role": invite.role, "status": invite.status, "expires_at": invite.expires_at, "email_sent": True}
 
 @router.post("/accept", status_code=status.HTTP_201_CREATED)
