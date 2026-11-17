@@ -1,4 +1,6 @@
-from tests.test_auth import registration_payload
+def registration_payload(email):
+    return {"full_name":"Test Founder","email":email,"password":"A-strong-test-password-123","business_name":"Example Trading","industry":"Retail","country":"ZA"}
+
 
 
 def auth_headers(response):
