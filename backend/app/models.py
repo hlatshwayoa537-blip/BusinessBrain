@@ -274,3 +274,43 @@ class InvoiceLineItem(Base):
     line_tax: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
     line_total: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
     invoice: Mapped[Invoice] = relationship(back_populates="lines")
+
+
+class DailyBusinessClose(Base):
+    __tablename__ = "daily_business_closes"
+    __table_args__ = (UniqueConstraint("business_id", "branch_name", "business_date", name="uq_daily_close_business_branch_date"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch_name: Mapped[str] = mapped_column(String(160), nullable=False, default="Main branch")
+    business_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="ZAR")
+    source_type: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
+    expected_cash: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    expected_card: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    expected_other: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    actual_cash: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    actual_card: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    actual_other: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    expenses_total: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    pos_transaction_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft", index=True)
+    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    submitted_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class DailyBusinessCloseAudit(Base):
+    __tablename__ = "daily_business_close_audit"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    close_id: Mapped[str] = mapped_column(ForeignKey("daily_business_closes.id", ondelete="CASCADE"), nullable=False, index=True)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    actor_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    details_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
