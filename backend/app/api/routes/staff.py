@@ -33,11 +33,12 @@ class EmailDeliveryError(RuntimeError):
 ALLOWED_ROLES = {"admin", "manager", "employee", "hr"}
 
 class StaffInviteCreate(BaseModel):
-    email: EmailStr
+    phone: str = Field(min_length=8, max_length=24)
     role: str = Field(pattern=r"^(admin|manager|employee|hr)$")
 
 class StaffAccept(BaseModel):
     token: str = Field(min_length=32, max_length=256)
+    email: EmailStr
     full_name: str = Field(min_length=2, max_length=160)
     password: str = Field(min_length=12, max_length=128)
 
@@ -172,62 +173,41 @@ def send_invite_email(email: str, business_name: str, invite_url: str):
 def list_staff(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     membership = get_membership(current_user, db)
     rows = db.execute(select(Membership, User).join(User, User.id == Membership.user_id).where(Membership.business_id == membership.business_id).order_by(Membership.created_at)).all()
-    return [{"id": m.id, "user_id": u.id, "full_name": u.full_name, "email": u.email, "role": m.role, "active": u.is_active, "joined_at": m.created_at} for m, u in rows]
+    return [{"id": m.id, "user_id": u.id, "full_name": u.full_name, "email": u.email, "phone": u.phone, "role": m.role, "active": u.is_active, "joined_at": m.created_at} for m, u in rows]
 
 @router.get("/invitations")
 def list_invitations(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.models import StaffInvitation
     membership = require_admin(current_user, db)
     rows = db.scalars(select(StaffInvitation).where(StaffInvitation.business_id == membership.business_id).order_by(StaffInvitation.created_at.desc())).all()
-    return [{"id": x.id, "email": x.email, "role": x.role, "status": x.status, "expires_at": x.expires_at, "created_at": x.created_at} for x in rows]
+    return [{"id": x.id, "phone": x.phone, "role": x.role, "status": x.status, "expires_at": x.expires_at, "created_at": x.created_at} for x in rows]
 
 @router.post("/invitations", status_code=status.HTTP_201_CREATED)
 def create_invitation(payload: StaffInviteCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.models import StaffInvitation
     membership = require_admin(current_user, db)
-    email = str(payload.email).lower().strip()
-    business = db.get(Business, membership.business_id)
-    existing_user = db.scalar(select(User).where(User.email == email))
-    if existing_user and db.scalar(select(Membership).where(Membership.user_id == existing_user.id, Membership.business_id == membership.business_id)):
-        raise HTTPException(status_code=409, detail="This person is already a member of your business.")
-    pending = db.scalar(select(StaffInvitation).where(StaffInvitation.business_id == membership.business_id, StaffInvitation.email == email, StaffInvitation.status == "pending"))
+    phone = "".join(ch for ch in payload.phone if ch.isdigit())
+    if len(phone) < 8 or len(phone) > 15:
+        raise HTTPException(status_code=422, detail="Enter a valid WhatsApp number with country code, for example +27 82 123 4567.")
+    pending = db.scalar(select(StaffInvitation).where(
+        StaffInvitation.business_id == membership.business_id,
+        StaffInvitation.phone == phone,
+        StaffInvitation.status == "pending"
+    ))
     if pending and pending.expires_at > utc_now():
-        raise HTTPException(status_code=409, detail="A pending invitation already exists for this email address.")
+        raise HTTPException(status_code=409, detail="A pending invitation already exists for this WhatsApp number.")
     raw_token = secrets.token_urlsafe(36)
-    invite = StaffInvitation(id=str(uuid4()), business_id=membership.business_id, invited_by_user_id=current_user.id, email=email, role=payload.role, token_hash=hashlib.sha256(raw_token.encode()).hexdigest(), status="pending", expires_at=utc_now()+timedelta(hours=48), created_at=utc_now())
+    invite = StaffInvitation(
+        id=str(uuid4()), business_id=membership.business_id,
+        invited_by_user_id=current_user.id, email=None, phone=phone,
+        role=payload.role,
+        token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
+        status="pending", expires_at=utc_now()+timedelta(hours=48), created_at=utc_now()
+    )
     db.add(invite)
     db.commit()
-    base_url = settings.frontend_base_url.rstrip("/")
-    invite_url = f"{base_url}/?staff_invite={raw_token}"
-    try:
-        sent = send_invite_email(email, business.name, invite_url)
-    except EmailDeliveryError as exc:
-        logger.error(
-            "Staff invitation email delivery failed (code=%s, resend_key_configured=%s, gmail_url_configured=%s, gmail_secret_configured=%s, smtp_host_configured=%s)",
-            exc.code,
-            bool(os.getenv("RESEND_API_KEY")),
-            bool(os.getenv("GMAIL_APPS_SCRIPT_URL")),
-            bool(os.getenv("GMAIL_APPS_SCRIPT_SECRET")),
-            bool(settings.smtp_host),
-        )
-        db.delete(invite)
-        db.commit()
-        raise HTTPException(status_code=502, detail=f"The invitation email could not be sent ({exc.code}).")
-    except Exception as exc:
-        logger.exception(
-            "Staff invitation email delivery failed unexpectedly (error_type=%s, resend_key_configured=%s, gmail_url_configured=%s, gmail_secret_configured=%s, smtp_host_configured=%s)",
-            type(exc).__name__,
-            bool(os.getenv("RESEND_API_KEY")),
-            bool(os.getenv("GMAIL_APPS_SCRIPT_URL")),
-            bool(os.getenv("GMAIL_APPS_SCRIPT_SECRET")),
-            bool(settings.smtp_host),
-        )
-        db.delete(invite)
-        db.commit()
-        raise HTTPException(status_code=502, detail="The invitation email could not be sent (EMAIL_DELIVERY_UNEXPECTED_ERROR).")
-    if not sent:
-        return {"id": invite.id, "email": email, "role": invite.role, "status": invite.status, "expires_at": invite.expires_at, "email_sent": False, "message": "Invitation saved, but email delivery is not configured. Configure the Gmail Apps Script relay, Resend (HTTPS), or SMTP to send invitation links."}
-    return {"id": invite.id, "email": email, "role": invite.role, "status": invite.status, "expires_at": invite.expires_at, "email_sent": True}
+    invite_url = f"{settings.frontend_base_url.rstrip('/')}/?staff_invite={raw_token}"
+    return {"id": invite.id, "phone": phone, "role": invite.role, "status": invite.status, "expires_at": invite.expires_at, "invite_url": invite_url}
 
 @router.post("/accept", status_code=status.HTTP_201_CREATED)
 def accept_invitation(payload: StaffAccept, db: Session = Depends(get_db)):
@@ -236,7 +216,7 @@ def accept_invitation(payload: StaffAccept, db: Session = Depends(get_db)):
     invite = db.scalar(select(StaffInvitation).where(StaffInvitation.token_hash == token_hash, StaffInvitation.status == "pending"))
     if not invite or invite.expires_at <= utc_now():
         raise HTTPException(status_code=400, detail="This invitation is invalid, expired or already used.")
-    email = invite.email.lower()
+    email = str(payload.email).lower().strip()
     user = db.scalar(select(User).where(User.email == email))
     if user:
         if db.scalar(select(Membership).where(Membership.user_id == user.id, Membership.business_id == invite.business_id)):
@@ -244,14 +224,16 @@ def accept_invitation(payload: StaffAccept, db: Session = Depends(get_db)):
         if not user.is_active:
             raise HTTPException(status_code=403, detail="This account is disabled. Contact the business owner.")
     else:
-        user = User(email=email, full_name=payload.full_name.strip(), password_hash=hash_password(payload.password))
+        user = User(email=email, full_name=payload.full_name.strip(), password_hash=hash_password(payload.password), phone=invite.phone)
         db.add(user)
         db.flush()
+    if not user.phone:
+        user.phone = invite.phone
     db.add(Membership(user_id=user.id, business_id=invite.business_id, role=invite.role))
     invite.status = "accepted"
     invite.accepted_at = utc_now()
     db.commit()
-    return {"accepted": True, "message": "Your account has joined the business. You can now sign in using your email and password."}
+    return {"accepted": True, "email": user.email, "message": "Your account has joined the business."}
 
 @router.patch("/{membership_id}")
 def update_staff_role(membership_id: str, payload: StaffRoleUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
