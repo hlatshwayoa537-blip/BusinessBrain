@@ -268,14 +268,16 @@ function SalesIntelligenceWorkspace({session}:{session:AuthData}) {
     setLoading(true);setError("");
     try{
       const headers={Authorization:"Bearer "+session.access_token};
-      const [d,b]=await Promise.all([
+      const [d,b,t]=await Promise.all([
         fetch(API_BASE+"/pos/analytics/daily?days=30&currency=ZAR",{headers}),
-        fetch(API_BASE+"/pos/analytics/branches?days=30&currency=ZAR",{headers})
+        fetch(API_BASE+"/pos/analytics/branches?days=30&currency=ZAR",{headers}),
+        fetch(API_BASE+"/pos/analytics/tills?days=30&currency=ZAR",{headers})
       ]);
-      const [dd,bd]=await Promise.all([d.json(),b.json()]);
+      const [dd,bd,td]=await Promise.all([d.json(),b.json(),t.json()]);
       if(!d.ok)throw new Error(dd.detail||"Could not load daily sales.");
       if(!b.ok)throw new Error(bd.detail||"Could not load branch sales.");
-      setDaily(dd.items as SalesDailyRow[]);setBranches(bd.items as SalesBranchRow[]);
+      if(!t.ok)throw new Error(td.detail||"Could not load till sales.");
+      setDaily(dd.items as SalesDailyRow[]);setBranches(bd.items as SalesBranchRow[]);setTills(td.items as SalesTillRow[]);
     }catch(e){setError(e instanceof Error?e.message:"Sales analytics could not be loaded.");}
     finally{setLoading(false);}
   }
