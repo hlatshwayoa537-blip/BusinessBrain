@@ -337,7 +337,6 @@ function InvoiceWorkspace({session}:{session:AuthData}) {
     try{await request("/invoices/"+invoice.id+"/status","PATCH",{status});setMessage(invoice.invoice_number+" marked "+status+".");await load();}
     catch(e){setError(e instanceof Error?e.message:"Invoice status could not be updated.");}
   }
-  const money=(value:string)=>currency+" "+Number(value).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});
   const preview=lines.reduce((total,line)=>{const subtotal=Number(line.quantity||0)*Number(line.unit_price||0);return total+subtotal+subtotal*Number(line.tax_rate||0)/100;},0);
   return <section className="invoice-workspace" id="invoices">
     <div className="profile-centre-heading"><div><div className="eyebrow">VEXION INVOICE CENTRE</div><h2>Create and track professional invoices.</h2><p>Build itemised invoices with VAT, due dates and payment status in one place.</p></div><span className="profile-status">Invoice records</span></div>
