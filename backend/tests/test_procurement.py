@@ -46,14 +46,14 @@ def test_supplier_purchase_order_and_goods_receipt_lifecycle(client):
 
     apple_line = next(line for line in submitted.json()["lines"] if line["description"] == "Apples")
     partial = client.post(f"/api/v1/procurement/purchase-orders/{data['id']}/receive", headers=auth, json={
-        "lines": [{"line_id": apple_line["id"], "quantity": "4"}], "note": "First delivery"
+        "lines": [{"line_id": apple_line["id"], "quantity": "4"}], "note": "First delivery", "idempotency_key": "receipt-apples-first-0001"
     })
     assert partial.status_code == 200
     assert partial.json()["status"] == "partially_received"
     assert next(line for line in partial.json()["lines"] if line["id"] == apple_line["id"])["quantity_outstanding"] == "6.000"
 
     over_receive = client.post(f"/api/v1/procurement/purchase-orders/{data['id']}/receive", headers=auth, json={
-        "lines": [{"line_id": apple_line["id"], "quantity": "7"}]
+        "lines": [{"line_id": apple_line["id"], "quantity": "7"}], "idempotency_key": "receipt-apples-over-0002"
     })
     assert over_receive.status_code == 422
 
@@ -62,7 +62,7 @@ def test_supplier_purchase_order_and_goods_receipt_lifecycle(client):
         "lines": [
             {"line_id": apple_line["id"], "quantity": "6"},
             {"line_id": bananas["id"], "quantity": "5"}
-        ]
+        ], "idempotency_key": "receipt-final-delivery-0003"
     })
     assert finish.status_code == 200
     assert finish.json()["status"] == "received"
