@@ -14,7 +14,7 @@ from app.models import Discrepancy, DiscrepancyEvent, DailyBusinessClose, Member
 
 router = APIRouter(prefix="/discrepancies", tags=["discrepancy management"])
 MANAGERS = {"owner", "admin", "manager"}
-MEMBERS = MANAGERS | {"staff"}
+MEMBERS = MANAGERS | {"staff", "employee", "hr"}
 
 
 class DiscrepancyCreate(BaseModel):
@@ -120,7 +120,7 @@ def create_discrepancy(
         amount=payload.amount, currency=payload.currency.upper(),
     )
     db.add(item)
-    add_event(db, item, user, "created", {"status": "open", "priority": item.priority})
+    add_event(db, item, user, "created", {"status": "open", "priority": item.priority, "assigned_to_user_id": item.assigned_to_user_id})
     db.commit()
     db.refresh(item)
     return serialize(item)
