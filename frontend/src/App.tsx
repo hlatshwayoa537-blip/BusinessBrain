@@ -815,7 +815,7 @@ function ReferralWorkspace({session}:{session:AuthData}) {
 
 
 
-type InventoryItemRecord = { id:string; sku?:string|null; name:string; unit:string; reorder_level:string; is_active:boolean; stock_total:string; stock_by_location:Record<string,string>; below_reorder_level:boolean };
+type InventoryItemRecord = { id:string; sku?:string|null; name:string; unit:string; reorder_level:string; is_active:boolean; stock_total:string; stock_by_location:Record<string,string>; below_reorder_level:boolean; negative_stock:boolean };
 type InventoryMovementRecord = { id:string; item_name:string; movement_type:string; quantity_delta:string; location:string; source_type:string; note?:string|null; created_at:string };
 
 function InventoryWorkspace({session}:{session:AuthData}) {
@@ -866,7 +866,7 @@ function InventoryWorkspace({session}:{session:AuthData}) {
   const fmt=(value:string)=>Number(value).toLocaleString("en-ZA",{minimumFractionDigits:3,maximumFractionDigits:3});
   return <section className="finance-centre" id="inventory-stock">
     <div className="profile-centre-heading"><div><div className="eyebrow">INVENTORY & STOCK CONTROL</div><h2>Know what is actually on hand.</h2><p>Stock is calculated from recorded movements, not estimates or assumed opening balances.</p></div><span className="profile-status">Movement-ledger stock</span></div>
-    <p className="finance-alert">POS sales do not yet reduce stock automatically because the current POS feed stores transaction totals, not product-level SKUs and quantities. This module will only deduct stock when item-level POS data is integrated.</p>
+    <p className="finance-alert">POS connections can now send item-level SKUs and quantities. Matched sale items deduct stock automatically; totals-only feeds, unmapped SKUs and CSV imports without item lines do not. Refunds are recorded but do not restock automatically because returned goods must be verified.</p>
     {error&&<p className="finance-alert" role="alert">{error}</p>}{message&&<p className="finance-success" role="status">{message}</p>}
     <form className="finance-form" onSubmit={createItem}>
       <h3>Add inventory item</h3>
@@ -879,7 +879,7 @@ function InventoryWorkspace({session}:{session:AuthData}) {
       {items.length===0?<p className="network-empty">No inventory items have been created.</p>:items.map(item=><article className="purchase-order-card" key={item.id}>
         <div className="profile-centre-heading"><div><strong>{item.name}</strong><p>{item.sku||"No SKU"} · {item.unit} · Reorder at {fmt(item.reorder_level)}</p></div><span className="quotation-status status-sent">{item.is_active?"Active":"Inactive"}</span></div>
         <h3>{fmt(item.stock_total)} <small>{item.unit} recorded</small></h3>
-        {item.below_reorder_level&&<p className="finance-alert">At or below the configured reorder level. Check actual stock before ordering.</p>}
+        {item.negative_stock&&<p className="finance-alert">Recorded stock is negative. Review the opening count, POS item mapping and recent sales before making corrections.</p>}{item.below_reorder_level&&<p className="finance-alert">At or below the configured reorder level. Check actual stock before ordering.</p>}
         <div className="purchase-order-line"><span>Recorded by location</span><strong>{Object.keys(item.stock_by_location).length?Object.entries(item.stock_by_location).map(([location,qty])=>location+": "+fmt(qty)).join(" · "):"No stock movements recorded"}</strong></div>
         {item.is_active&&<div className="purchase-line-draft"><h4>Record verified stock movement</h4><div className="finance-toolbar"><label>Quantity change (+ or −)<input type="number" step="0.001" value={adjustments[item.id]?.quantity||""} onChange={e=>setAdjustment(item.id,"quantity",e.target.value)} placeholder="+10 or -2"/></label><label>Location<input value={adjustments[item.id]?.location||"Main"} onChange={e=>setAdjustment(item.id,"location",e.target.value)} /></label><label>Reason<input value={adjustments[item.id]?.reason||""} onChange={e=>setAdjustment(item.id,"reason",e.target.value)} placeholder="Opening count / damaged goods"/></label></div><button type="button" className="network-secondary-button" onClick={()=>void adjust(item)}>Record stock movement</button></div>}
       </article>)}
