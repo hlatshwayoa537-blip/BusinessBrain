@@ -190,7 +190,7 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
 
 
 type DailyCloseRow = {
-  id:string; business_date:string; branch_name:string; timezone_name:string; source_type:"pos"|"manual"; pos_transaction_count:number;
+  id:string; business_date:string; branch_name:string; currency:string; timezone_name:string; source_type:"pos"|"manual"; pos_transaction_count:number;
   expected_cash:string; expected_card:string; expected_other:string; expected_total:string|null;
   actual_cash:string; actual_card:string; actual_other:string; actual_total:string; expenses_total:string;
   variance_cash:string|null; variance_card:string|null; variance_other:string|null; variance_total:string|null;
@@ -247,7 +247,7 @@ function DailyCloseWorkspace({session}:{session:AuthData}) {
         expected_cash:expectedCash===""?null:expectedCash,expected_card:expectedCard===""?null:expectedCard,expected_other:expectedOther===""?null:expectedOther,
         actual_cash:actualCash,actual_card:actualCard,actual_other:actualOther,expenses_total:expenses,notes:notes||null
       }) as DailyCloseRow;
-      setSelected(data);setMessage(data.source_type==="pos"?"Saved. Expected totals were calculated from matching POS transactions.":"Saved as a manual close because no matching POS transactions were found.");
+      setSelected(data);void loadReconciliation(data);setMessage(data.source_type==="pos"?"Saved. Expected totals were calculated from matching POS transactions.":"Saved as a manual close because no matching POS transactions were found.");
       await load();
     } catch(e){setError(e instanceof Error?e.message:"Could not save this close.");}
     finally{setBusy(false);}
@@ -285,15 +285,15 @@ function DailyCloseWorkspace({session}:{session:AuthData}) {
         "Variance (actual received minus current POS): "+lines.join("; ")+".",
         "This case records a difference for investigation. It does not change the daily close or POS transactions."
       ].join("\n");
-      const created=await request("/discrepancies","POST",{
+      await request("/discrepancies","POST",{
         daily_close_id:row.id,
         title:"POS reconciliation difference — "+row.branch_name+" · "+row.business_date,
         description:detail,
         category:"reconciliation",
         priority:"normal",
         amount:singleAmount,
-        currency:"ZAR"
-      }) as {id:string};
+        currency:row.currency
+      });
       setMessage("Reconciliation case created. Open Discrepancy Management to assign and investigate it.");
       window.setTimeout(()=>document.getElementById("discrepancies")?.scrollIntoView({behavior:"smooth",block:"start"}),150);
     } catch(e) {
