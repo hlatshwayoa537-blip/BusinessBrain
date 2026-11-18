@@ -1,6 +1,7 @@
 from collections import defaultdict
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,6 +12,7 @@ from app.schemas_finance import FinanceSummaryResponse, FinanceTransactionCreate
 
 router = APIRouter(prefix="/finance", tags=["finance"])
 ZERO = Decimal("0.00")
+BUSINESS_TIMEZONE = ZoneInfo("Africa/Johannesburg")
 
 def current_membership(user: User, db: Session) -> Membership:
     membership = db.scalar(select(Membership).where(Membership.user_id == user.id).order_by(Membership.created_at))
@@ -109,20 +111,27 @@ def finance_summary(
     pos_sales = ZERO
     pos_refunds = ZERO
     pos_transaction_count = 0
+    # Reporting periods follow South African business dates, not UTC calendar dates.
+    period_start = datetime(selected_year, 1, 1, tzinfo=BUSINESS_TIMEZONE).astimezone(timezone.utc)
+    period_end = datetime(selected_year + 1, 1, 1, tzinfo=BUSINESS_TIMEZONE).astimezone(timezone.utc)
     pos_rows = db.scalars(select(POSTransaction).where(
         POSTransaction.business_id == membership.business_id,
-        POSTransaction.occurred_at >= datetime(selected_year, 1, 1, tzinfo=timezone.utc),
-        POSTransaction.occurred_at < datetime(selected_year + 1, 1, 1, tzinfo=timezone.utc),
+        POSTransaction.occurred_at >= period_start,
+        POSTransaction.occurred_at < period_end,
         POSTransaction.currency == "ZAR",
     )).all()
     for pos_record in pos_rows:
+        occurred_at = pos_record.occurred_at
+        if occurred_at.tzinfo is None:
+            occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+        business_month = occurred_at.astimezone(BUSINESS_TIMEZONE).month
         if pos_record.transaction_type == "sale":
             pos_sales += Decimal(pos_record.net_amount)
-            monthly[pos_record.occurred_at.month]["income"] += Decimal(pos_record.net_amount)
+            monthly[business_month]["income"] += Decimal(pos_record.net_amount)
             pos_transaction_count += 1
         elif pos_record.transaction_type == "refund":
             pos_refunds += Decimal(pos_record.net_amount)
-            monthly[pos_record.occurred_at.month]["income"] -= Decimal(pos_record.net_amount)
+            monthly[business_month]["income"] -= Decimal(pos_record.net_amount)
             pos_transaction_count += 1
     for record in records:
         amount = Decimal(record.amount)
