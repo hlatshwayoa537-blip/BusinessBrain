@@ -468,3 +468,36 @@ class PurchaseOrderEvent(Base):
     event_type: Mapped[str] = mapped_column(String(32), nullable=False)
     details_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+class InventoryItem(Base):
+    __tablename__ = "inventory_items"
+    __table_args__ = (UniqueConstraint("business_id", "sku", name="uq_inventory_item_business_sku"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    sku: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False)
+    unit: Mapped[str] = mapped_column(String(24), nullable=False, default="unit")
+    reorder_level: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class InventoryMovement(Base):
+    __tablename__ = "inventory_movements"
+    __table_args__ = (
+        UniqueConstraint("source_event_id", "source_line_id", name="uq_inventory_source_receipt_line"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    inventory_item_id: Mapped[str] = mapped_column(ForeignKey("inventory_items.id", ondelete="RESTRICT"), nullable=False, index=True)
+    movement_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    quantity_delta: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False)
+    location: Mapped[str] = mapped_column(String(120), nullable=False, default="Main")
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    source_event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    source_line_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
