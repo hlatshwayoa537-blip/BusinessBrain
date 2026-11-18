@@ -106,7 +106,7 @@ def ingest_transaction(
     if occurred_at.tzinfo is None:
         occurred_at = occurred_at.replace(tzinfo=timezone.utc)
     record = POSTransaction(
-        business_id=connection.business_id, connection_id=connection.id,
+        id=str(uuid.uuid4()), business_id=connection.business_id, connection_id=connection.id,
         external_transaction_id=payload.external_transaction_id,
         branch_name=payload.branch_name, till_name=payload.till_name,
         transaction_type=payload.transaction_type, occurred_at=occurred_at,
@@ -115,7 +115,6 @@ def ingest_transaction(
         net_amount=payload.net_amount, payment_method=payload.payment_method,
     )
     db.add(record)
-    db.flush()
     stock_location = (payload.branch_name or "").strip()[:120] or "Main"
     for line_number, item in enumerate(payload.items, start=1):
         sku = item.sku.strip() if item.sku and item.sku.strip() else None
