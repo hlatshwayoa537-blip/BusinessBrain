@@ -196,6 +196,14 @@ type DailyCloseRow = {
   variance_cash:string|null; variance_card:string|null; variance_other:string|null; variance_total:string|null;
   notes?:string|null; status:string; review_note?:string|null;
 };
+type ReconciliationData = {
+  status:"manual_baseline"|"pos_data_missing"|"source_changed"|"reconciled";
+  message:string;
+  pos_transaction_count:number;
+  pos_totals:{cash:string;card:string;other:string}|null;
+  actual_received:{cash:string;card:string;other:string};
+  variance_vs_pos:{cash:string;card:string;other:string}|null;
+};
 function DailyCloseWorkspace({session}:{session:AuthData}) {
   const today=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
   const [businessDate,setBusinessDate]=useState(today);
@@ -210,6 +218,9 @@ function DailyCloseWorkspace({session}:{session:AuthData}) {
   const [notes,setNotes]=useState("");
   const [rows,setRows]=useState<DailyCloseRow[]>([]);
   const [selected,setSelected]=useState<DailyCloseRow|null>(null);
+  const [reconciliation,setReconciliation]=useState<ReconciliationData|null>(null);
+  const [reconciliationLoading,setReconciliationLoading]=useState(false);
+  const [caseBusy,setCaseBusy]=useState(false);
   const [reviewNote,setReviewNote]=useState("");
   const [busy,setBusy]=useState(false);
   const [loading,setLoading]=useState(true);
@@ -240,6 +251,56 @@ function DailyCloseWorkspace({session}:{session:AuthData}) {
       await load();
     } catch(e){setError(e instanceof Error?e.message:"Could not save this close.");}
     finally{setBusy(false);}
+  }
+  async function loadReconciliation(row:DailyCloseRow) {
+    setReconciliationLoading(true);
+    setReconciliation(null);
+    try {
+      const result=await request("/daily-closes/"+row.id+"/reconciliation") as ReconciliationData;
+      setReconciliation(result);
+    } catch(e) {
+      setError(e instanceof Error?e.message:"Could not refresh the POS reconciliation.");
+    } finally {
+      setReconciliationLoading(false);
+    }
+  }
+  async function createCaseFromReconciliation(row:DailyCloseRow) {
+    if(!reconciliation || !reconciliation.variance_vs_pos) return;
+    const differences=Object.entries(reconciliation.variance_vs_pos).filter(([,value])=>Number(value)!==0);
+    if(differences.length===0) return;
+    setCaseBusy(true);setError("");setMessage("");
+    try {
+      const existing=await request("/discrepancies") as {daily_close_id:string|null;category:string;status:string}[];
+      const openCase=existing.find(item=>item.daily_close_id===row.id&&item.category==="reconciliation"&&item.status!=="resolved");
+      if(openCase) {
+        setMessage("An active reconciliation case already exists for this daily close. Open it in Discrepancy Management to continue the investigation.");
+        return;
+      }
+      const lines=differences.map(([bucket,value])=>bucket.toUpperCase()+": "+(Number(value)>0?"+":"")+"R "+Number(value).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2}));
+      const singleAmount=differences.length===1?differences[0][1]:null;
+      const detail=[
+        "Created from the current POS reconciliation for "+row.branch_name+" on "+row.business_date+".",
+        "Current POS totals: "+Object.entries(reconciliation.pos_totals||{}).map(([key,value])=>key+" R "+Number(value).toFixed(2)).join("; ")+".",
+        "Amounts counted/confirmed: "+Object.entries(reconciliation.actual_received||{}).map(([key,value])=>key+" R "+Number(value).toFixed(2)).join("; ")+".",
+        "Variance (actual received minus current POS): "+lines.join("; ")+".",
+        "This case records a difference for investigation. It does not change the daily close or POS transactions."
+      ].join("\n");
+      const created=await request("/discrepancies","POST",{
+        daily_close_id:row.id,
+        title:"POS reconciliation difference — "+row.branch_name+" · "+row.business_date,
+        description:detail,
+        category:"reconciliation",
+        priority:"normal",
+        amount:singleAmount,
+        currency:"ZAR"
+      }) as {id:string};
+      setMessage("Reconciliation case created. Open Discrepancy Management to assign and investigate it.");
+      window.setTimeout(()=>document.getElementById("discrepancies")?.scrollIntoView({behavior:"smooth",block:"start"}),150);
+    } catch(e) {
+      setError(e instanceof Error?e.message:"Could not create the reconciliation case.");
+    } finally {
+      setCaseBusy(false);
+    }
   }
   async function submitClose(row:DailyCloseRow) {
     setBusy(true);setError("");setMessage("");
@@ -283,7 +344,7 @@ function DailyCloseWorkspace({session}:{session:AuthData}) {
       </form>
       <div className="finance-form">
         <div className="recruitment-card-heading"><div><span className="eyebrow">REVIEW QUEUE</span><h3>Recent daily closes</h3></div><button type="button" className="network-secondary-button" onClick={()=>void load()}>Refresh</button></div>
-        {loading?<p className="network-empty">Loading daily closes…</p>:rows.length===0?<p className="network-empty">No daily closes recorded yet. Start with your first branch and business date.</p>:<div className="finance-record-list">{rows.map(row=><button type="button" key={row.id} className="finance-record-row" onClick={()=>setSelected(row)}><span><strong>{row.branch_name}</strong><small>{row.business_date} · {row.source_type==="pos"?"POS reconciled":"Manual figures"}</small></span><span><strong>{row.status.replace("_"," ")}</strong><small>Variance: {money(row.variance_total)}</small></span></button>)}</div>}
+        {loading?<p className="network-empty">Loading daily closes…</p>:rows.length===0?<p className="network-empty">No daily closes recorded yet. Start with your first branch and business date.</p>:<div className="finance-record-list">{rows.map(row=><button type="button" key={row.id} className="finance-record-row" onClick={()=>{setSelected(row);void loadReconciliation(row);}}><span><strong>{row.branch_name}</strong><small>{row.business_date} · {row.source_type==="pos"?"POS reconciled":"Manual figures"}</small></span><span><strong>{row.status.replace("_"," ")}</strong><small>Variance: {money(row.variance_total)}</small></span></button>)}</div>}
       </div>
     </div>
     {selected&&<div className="finance-form daily-close-detail">
@@ -296,6 +357,20 @@ function DailyCloseWorkspace({session}:{session:AuthData}) {
       </div>
       <div className="profile-fields-grid">
         <p>Cash difference: <strong>{money(selected.variance_cash)}</strong></p><p>Card difference: <strong>{money(selected.variance_card)}</strong></p><p>Other difference: <strong>{money(selected.variance_other)}</strong></p>
+      </div>
+      <div className="finance-form">
+        <div className="recruitment-card-heading"><div><span className="eyebrow">LIVE POS RECHECK</span><h3>Current source reconciliation</h3></div><button type="button" className="network-secondary-button" disabled={reconciliationLoading} onClick={()=>void loadReconciliation(selected)}>{reconciliationLoading?"Checking…":"Refresh POS check"}</button></div>
+        {reconciliationLoading?<p className="network-empty">Checking the current POS ledger…</p>:!reconciliation?<p className="network-empty">Select refresh to check whether current POS records still match this saved close.</p>:<>
+          <p className="finance-disclaimer">{reconciliation.message}</p>
+          <div className="profile-fields-grid">
+            <p>Reconciliation status: <strong>{reconciliation.status.replaceAll("_"," ")}</strong></p>
+            <p>Current POS transactions: <strong>{reconciliation.pos_transaction_count}</strong></p>
+            {reconciliation.pos_totals&&Object.entries(reconciliation.pos_totals).map(([key,value])=><p key={key}>POS {key}: <strong>{money(value)}</strong></p>)}
+            {reconciliation.variance_vs_pos&&Object.entries(reconciliation.variance_vs_pos).map(([key,value])=><p key={key}>{key} variance: <strong>{money(value)}</strong></p>)}
+          </div>
+          {reconciliation.variance_vs_pos&&Object.values(reconciliation.variance_vs_pos).some(value=>Number(value)!==0)&&<button type="button" className="auth-submit" disabled={caseBusy} onClick={()=>void createCaseFromReconciliation(selected)}>{caseBusy?"Creating case…":"Create investigation case from this difference"} <ArrowUpRight size={16}/></button>}
+          {(reconciliation.status==="manual_baseline"||reconciliation.status==="pos_data_missing")&&<p className="finance-disclaimer">A case cannot be generated from a POS comparison because there is no verifiable POS baseline available for this close.</p>}
+        </>}
       </div>
       {selected.notes&&<p>{selected.notes}</p>}{selected.review_note&&<p className="finance-alert">Review note: {selected.review_note}</p>}
       {selected.status==="draft"&&<button type="button" className="auth-submit" disabled={busy} onClick={()=>void submitClose(selected)}>Submit for manager review</button>}
