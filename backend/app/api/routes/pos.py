@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.api.routes.auth import get_current_user
 from app.db import get_db
-from app.models import Membership, POSConnection, POSTransaction, User
+from app.models import InventoryItem, InventoryMovement, Membership, POSConnection, POSTransaction, POSTransactionLine, User
 from app.schemas_pos import POSConnectionCreate, POSConnectionCreated, POSConnectionResponse, POSIngestTransaction, POSTransactionResponse, POSSalesSummary
 
 router = APIRouter(prefix="/pos", tags=["POS integrations"])
@@ -114,6 +114,35 @@ def ingest_transaction(
         net_amount=payload.net_amount, payment_method=payload.payment_method,
     )
     db.add(record)
+    db.flush()
+    stock_location = (payload.branch_name or "").strip()[:120] or "Main"
+    for line_number, item in enumerate(payload.items, start=1):
+        sku = item.sku.strip() if item.sku and item.sku.strip() else None
+        inventory_item = None
+        if sku:
+            inventory_item = db.scalar(select(InventoryItem).where(
+                InventoryItem.business_id == connection.business_id,
+                func.lower(InventoryItem.sku) == sku.lower(),
+                InventoryItem.is_active.is_(True),
+            ))
+        line_total = item.quantity * item.unit_price
+        line = POSTransactionLine(
+            id=str(uuid.uuid4()), transaction_id=record.id, business_id=connection.business_id,
+            line_number=line_number, sku=sku, description=item.description,
+            quantity=item.quantity, unit_price=item.unit_price, line_total=line_total,
+            inventory_item_id=inventory_item.id if inventory_item else None,
+        )
+        db.add(line)
+        if record.transaction_type == "sale" and inventory_item:
+            db.add(InventoryMovement(
+                id=str(uuid.uuid4()), business_id=connection.business_id,
+                inventory_item_id=inventory_item.id, movement_type="pos_sale",
+                quantity_delta=-item.quantity, location=stock_location,
+                source_type="pos_transaction", source_id=record.id,
+                source_event_id=record.id, source_line_id=line.id,
+                note=f"POS sale {record.external_transaction_id}",
+                created_by_user_id=connection.created_by_user_id,
+            ))
     connection.last_received_at = datetime.now(timezone.utc)
     connection.status = "active"
     try:
