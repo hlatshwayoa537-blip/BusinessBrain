@@ -518,7 +518,7 @@ function InvoiceWorkspace({session}:{session:AuthData}) {
   const [dueDate,setDueDate]=useState(today);
   const [currency,setCurrency]=useState("ZAR");
   const [notes,setNotes]=useState("");
-  const [lines,setLines]=useState<InvoiceLineDraft[]>([{description:"",product_id:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
+  const [lines,setLines]=useState<InvoiceLineDraft[]>([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
   const [loading,setLoading]=useState(true);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
@@ -536,7 +536,7 @@ function InvoiceWorkspace({session}:{session:AuthData}) {
     event.preventDefault();setBusy(true);setError("");setMessage("");
     try{
       const created=await request("/invoices","POST",{customer_name:customer,customer_email:email||null,customer_phone:phone||null,customer_address:address||null,issue_date:issueDate,due_date:dueDate,currency,notes:notes||null,lines}) as InvoiceData;
-      setMessage("Invoice "+created.invoice_number+" created as a draft.");setCustomer("");setEmail("");setPhone("");setAddress("");setNotes("");setLines([{description:"",product_id:"",quantity:"1",unit_price:"",tax_rate:"15"}]);await load();
+      setMessage("Invoice "+created.invoice_number+" created as a draft.");setCustomer("");setEmail("");setPhone("");setAddress("");setNotes("");setLines([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);await load();
     }catch(e){setError(e instanceof Error?e.message:"Invoice could not be created.");}
     finally{setBusy(false);}
   }
@@ -556,7 +556,7 @@ function InvoiceWorkspace({session}:{session:AuthData}) {
         <label>Customer address<textarea rows={2} maxLength={2000} value={address} onChange={e=>setAddress(e.target.value)} placeholder="Billing address (optional)"/></label>
         <div className="finance-form-row"><label>Invoice date<input type="date" required value={issueDate} onChange={e=>setIssueDate(e.target.value)}/></label><label>Due date<input type="date" required min={issueDate} value={dueDate} onChange={e=>setDueDate(e.target.value)}/></label></div>
         <label>Currency<select value={currency} onChange={e=>setCurrency(e.target.value)}><option value="ZAR">South African rand (ZAR)</option><option value="USD">US dollar (USD)</option><option value="GBP">Pound sterling (GBP)</option><option value="EUR">Euro (EUR)</option></select></label>
-        <div className="invoice-lines-heading"><strong>Invoice items</strong><button type="button" className="network-secondary-button" onClick={()=>setLines(current=>[...current,{description:"",product_id:"",quantity:"1",unit_price:"",tax_rate:"15"}])}>Add item</button></div>
+        <div className="invoice-lines-heading"><strong>Invoice items</strong><button type="button" className="network-secondary-button" onClick={()=>setLines(current=>[...current,{description:"",quantity:"1",unit_price:"",tax_rate:"15"}])}>Add item</button></div>
         {lines.map((line,index)=><div className="invoice-line-editor" key={index}><label>Description<input required minLength={2} maxLength={240} value={line.description} onChange={e=>updateLine(index,{description:e.target.value})} placeholder="Product or service"/></label><div className="invoice-line-fields"><label>Qty<input required type="number" min="0.001" step="0.001" value={line.quantity} onChange={e=>updateLine(index,{quantity:e.target.value})}/></label><label>Unit price<input required type="number" min="0" step="0.01" value={line.unit_price} onChange={e=>updateLine(index,{unit_price:e.target.value})}/></label><label>VAT %<input required type="number" min="0" max="100" step="0.01" value={line.tax_rate} onChange={e=>updateLine(index,{tax_rate:e.target.value})}/></label><button type="button" className="network-secondary-button" disabled={lines.length===1} onClick={()=>setLines(current=>current.filter((_,i)=>i!==index))}>Remove</button></div></div>)}
         <label>Notes / payment terms<textarea rows={2} maxLength={3000} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Payment instructions or additional notes"/></label>
         <div className="invoice-preview-total"><span>Estimated total including VAT</span><strong>{currency} {preview.toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></div>
@@ -851,7 +851,7 @@ function InventoryWorkspace({session}:{session:AuthData}) {
     finally{setBusy(false);}
   }
   function setAdjustment(itemId:string,key:"quantity"|"location"|"reason",value:string) {
-    setAdjustments(current=>({...current,[itemId]:{quantity:"",location:"Main",reason:"",...current[itemId],[key]:value}}));
+    setAdjustments(current=>{const previous=current[itemId]||{quantity:"",location:"Main",reason:""};return {...current,[itemId]:{...previous,[key]:value}};});
   }
   async function adjust(item:InventoryItemRecord) {
     const draft=adjustments[item.id]||{quantity:"",location:"Main",reason:""};
@@ -919,8 +919,9 @@ function SupplierPurchasingWorkspace({session}:{session:AuthData}) {
   }
   async function refresh() {
     try {
-      const [supplierRows,orderRows]=await Promise.all([request("/procurement/suppliers"),request("/procurement/purchase-orders")]);
+      const [supplierRows,orderRows,itemRows]=await Promise.all([request("/procurement/suppliers"),request("/procurement/purchase-orders"),request("/inventory/items?active_only=true")]);
       setSuppliers(supplierRows as SupplierRecord[]);
+      setInventoryItems(itemRows as InventoryItemRecord[]);
       setOrders(orderRows as PurchaseOrderRecord[]);
     } catch(err) { setError(err instanceof Error?err.message:"Could not load supplier and purchasing records."); }
   }
@@ -1054,7 +1055,7 @@ export default function App() {
   const [quoteCurrency, setQuoteCurrency] = useState("ZAR");
   const [quoteValidUntil, setQuoteValidUntil] = useState("");
   const [quoteNotes, setQuoteNotes] = useState("");
-  const [quoteLines, setQuoteLines] = useState<QuoteLineDraft[]>([{description:"",product_id:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
+  const [quoteLines, setQuoteLines] = useState<QuoteLineDraft[]>([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
   const [inviteTarget, setInviteTarget] = useState<PublicBusiness | null>(null);
   const [invitePassword, setInvitePassword] = useState("");
   const [inviteMessage, setInviteMessage] = useState("");
@@ -1630,7 +1631,7 @@ export default function App() {
         </div>
       </section>
       <section className="stats-grid" aria-label="Workspace summary"><div className="stat-card"><span className="stat-icon">{session.business.profile_image_data_url ? <img src={session.business.profile_image_data_url} alt="Business profile"/> : <Building2 size={18}/>}</span><span className="stat-label">Business profile</span><strong>Created</strong><small>{session.business.country} · {session.business.industry}</small></div><div className="stat-card"><span className="stat-icon"><Users size={18}/></span><span className="stat-label">Your role</span><strong>Owner</strong><small>Workspace administrator</small></div><div className="stat-card"><span className="stat-icon"><CreditCard size={18}/></span><span className="stat-label">Financial overview</span><strong>Not connected</strong><small>Add records as you get started</small></div><div className="stat-card"><span className="stat-icon"><Activity size={18}/></span><span className="stat-label">System status</span><strong>{apiStatus === "online" ? "Connected" : "Offline"}</strong><small>Backend health check</small></div></section>
-      <section className="modules-section"><div className="section-heading"><div><div className="eyebrow">THE BUSINESS OPERATING SYSTEM</div><h2>Your business, connected.</h2><p>One workspace for the work that moves your business forward.</p></div><span className="module-count">07 CORE MODULES</span></div><div className="module-grid">{modules.map(({icon: Icon,title,detail,tag}) => <article className="module-card" key={title}><div className="module-icon"><Icon size={20}/></div><span className="module-tag">{tag}</span><h3>{title}</h3><p>{detail}</p><span className="module-footer">Part of VEXION <ArrowUpRight size={14}/></span></article>)}</div></section>
+      <section className="modules-section"><div className="section-heading"><div><div className="eyebrow">THE BUSINESS OPERATING SYSTEM</div><h2>Your business, connected.</h2><p>One workspace for the work that moves your business forward.</p></div><span className="module-count">06 CORE MODULES</span></div><div className="module-grid">{modules.map(({icon: Icon,title,detail,tag}) => <article className="module-card" key={title}><div className="module-icon"><Icon size={20}/></div><span className="module-tag">{tag}</span><h3>{title}</h3><p>{detail}</p><span className="module-footer">Part of VEXION <ArrowUpRight size={14}/></span></article>)}</div></section>
       <footer className="footer"><span>VEXION © 2026</span><span>BUILD THE INTELLIGENCE THAT RUNS BUSINESSES.</span></footer>
     </main>
   </div>;
