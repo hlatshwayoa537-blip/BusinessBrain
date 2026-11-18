@@ -260,3 +260,125 @@ def daily_close_audit(
     ).order_by(DailyBusinessCloseAudit.created_at.asc())).all()
     return [{"id": e.id, "actor_user_id": e.actor_user_id, "action": e.action,
              "details": json.loads(e.details_json or "{}"), "created_at": e.created_at} for e in events]
+
+
+
+@router.get("/{close_id}/reconciliation")
+def reconcile_daily_close(
+    close_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Compare a saved daily close with the current POS ledger without changing either source."""
+    membership = current_membership(user, db)
+    row = db.scalar(select(DailyBusinessClose).where(
+        DailyBusinessClose.id == close_id,
+        DailyBusinessClose.business_id == membership.business_id,
+    ))
+    if not row:
+        raise HTTPException(status_code=404, detail="Daily close not found.")
+
+    if row.source_type != "pos":
+        return {
+            "close_id": row.id,
+            "status": "manual_baseline",
+            "source_type": "manual",
+            "message": "This close used manually entered expected totals. No POS baseline was recorded, so a POS reconciliation cannot be verified.",
+            "pos_transaction_count": 0,
+            "pos_totals": None,
+            "close_expected": None,
+            "actual_received": {
+                "cash": as_money(row.actual_cash),
+                "card": as_money(row.actual_card),
+                "other": as_money(row.actual_other),
+            },
+            "variance_vs_pos": None,
+        }
+
+    try:
+        tz = ZoneInfo(row.timezone_name)
+    except ZoneInfoNotFoundError:
+        raise HTTPException(status_code=409, detail="The saved business timezone is invalid; reconciliation cannot be calculated.") from None
+    local_start = datetime.combine(row.business_date, time.min, tzinfo=tz)
+    local_end = local_start + timedelta(days=1)
+    start_utc = local_start.astimezone(timezone.utc)
+    end_utc = local_end.astimezone(timezone.utc)
+    transactions = db.scalars(select(POSTransaction).where(
+        POSTransaction.business_id == membership.business_id,
+        POSTransaction.currency == row.currency,
+        POSTransaction.branch_name == row.branch_name,
+        POSTransaction.occurred_at >= start_utc,
+        POSTransaction.occurred_at < end_utc,
+    )).all()
+
+    totals = {"cash": ZERO, "card": ZERO, "other": ZERO}
+    counted = 0
+    for transaction in transactions:
+        if transaction.transaction_type == "void":
+            continue
+        amount = Decimal(transaction.net_amount or 0)
+        if transaction.transaction_type == "refund":
+            amount = -abs(amount)
+        method = (transaction.payment_method or "").casefold()
+        bucket = "cash" if "cash" in method else "card" if any(
+            token in method for token in ("card", "visa", "master", "credit", "debit")
+        ) else "other"
+        totals[bucket] += amount
+        counted += 1
+
+    if counted == 0:
+        return {
+            "close_id": row.id,
+            "status": "pos_data_missing",
+            "source_type": "pos",
+            "message": "No matching POS transactions are currently available for this branch and date. The saved POS baseline cannot be independently rechecked.",
+            "saved_pos_transaction_count": row.pos_transaction_count,
+            "pos_transaction_count": 0,
+            "pos_totals": None,
+            "close_expected": {
+                "cash": as_money(row.expected_cash),
+                "card": as_money(row.expected_card),
+                "other": as_money(row.expected_other),
+            },
+            "actual_received": {
+                "cash": as_money(row.actual_cash),
+                "card": as_money(row.actual_card),
+                "other": as_money(row.actual_other),
+            },
+            "variance_vs_pos": None,
+        }
+
+    current_expected = {
+        "cash": Decimal(row.expected_cash or 0),
+        "card": Decimal(row.expected_card or 0),
+        "other": Decimal(row.expected_other or 0),
+    }
+    changed = any(totals[key] != current_expected[key] for key in totals)
+    variances = {
+        key: row_actual - totals[key]
+        for key, row_actual in (
+            ("cash", Decimal(row.actual_cash)),
+            ("card", Decimal(row.actual_card)),
+            ("other", Decimal(row.actual_other)),
+        )
+    }
+    return {
+        "close_id": row.id,
+        "status": "source_changed" if changed else "reconciled",
+        "source_type": "pos",
+        "message": (
+            "The current POS ledger differs from the POS figures saved with this close. Review late, corrected or newly imported transactions."
+            if changed else
+            "The current POS ledger matches the expected figures saved with this close. Differences below compare counted/confirmed receipts against POS totals."
+        ),
+        "saved_pos_transaction_count": row.pos_transaction_count,
+        "pos_transaction_count": counted,
+        "pos_totals": {key: as_money(value) for key, value in totals.items()},
+        "close_expected": {key: as_money(value) for key, value in current_expected.items()},
+        "actual_received": {
+            "cash": as_money(row.actual_cash),
+            "card": as_money(row.actual_card),
+            "other": as_money(row.actual_other),
+        },
+        "variance_vs_pos": {key: as_money(value) for key, value in variances.items()},
+    }
