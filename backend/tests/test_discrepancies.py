@@ -98,3 +98,71 @@ def test_discrepancy_rejects_daily_close_from_another_business(client):
         "description": "This case must not be linked to another business close.",
     })
     assert response.status_code == 404
+
+
+
+def test_discrepancy_evidence_upload_is_scanned_audited_and_download_scoped(client, monkeypatch):
+    from app.api.routes import discrepancy_evidence as evidence_routes
+
+    owner = register(client, "evidence-owner@example.com", "Evidence Owner", "Evidence Store")
+    other = register(client, "evidence-other@example.com", "Other Owner", "Other Store")
+    auth = headers(owner)
+    created = client.post("/api/v1/discrepancies", headers=auth, json={
+        "title": "Receipt required", "description": "Attach the supporting receipt for review.",
+    })
+    assert created.status_code == 201
+    case_id = created.json()["id"]
+
+    monkeypatch.setattr(evidence_routes, "presigned_upload", lambda *args: {
+        "url": "https://private-storage.invalid", "fields": {"key": "quarantine/test"},
+    })
+    monkeypatch.setattr(evidence_routes, "object_head", lambda key: {
+        "ContentLength": 1234, "ContentType": "application/pdf",
+    })
+    monkeypatch.setattr(evidence_routes, "scan_object_with_clamav", lambda key: None)
+    monkeypatch.setattr(evidence_routes, "promote_clean_object", lambda source, target: None)
+    monkeypatch.setattr(evidence_routes, "presigned_download", lambda *args: "https://private-storage.invalid/download")
+
+    ticket = client.post(f"/api/v1/discrepancies/{case_id}/evidence/upload-url", headers=auth, json={
+        "filename": "receipt.pdf", "content_type": "application/pdf", "size_bytes": 1234,
+    })
+    assert ticket.status_code == 201
+    evidence_id = ticket.json()["evidence_id"]
+
+    completed = client.post(f"/api/v1/discrepancies/evidence/{evidence_id}/complete", headers=auth)
+    assert completed.status_code == 200
+    assert completed.json()["status"] == "clean"
+
+    listing = client.get(f"/api/v1/discrepancies/{case_id}/evidence", headers=auth)
+    assert listing.status_code == 200
+    assert len(listing.json()) == 1
+    assert listing.json()[0]["original_filename"] == "receipt.pdf"
+
+    detail = client.get(f"/api/v1/discrepancies/{case_id}", headers=auth)
+    assert [event["event_type"] for event in detail.json()["events"]][-2:] == [
+        "evidence_upload_started", "evidence_attached"
+    ]
+
+    download = client.post(f"/api/v1/discrepancies/evidence/{evidence_id}/download-url", headers=auth)
+    assert download.status_code == 200
+    assert download.json()["download_url"].endswith("/download")
+
+    other_headers = headers(other)
+    forbidden = client.post(
+        f"/api/v1/discrepancies/evidence/{evidence_id}/download-url", headers=other_headers
+    )
+    assert forbidden.status_code == 404
+
+
+def test_discrepancy_evidence_rejects_unsupported_file_type(client):
+    owner = register(client, "evidence-type@example.com", "Evidence Type", "Evidence Type Store")
+    auth = headers(owner)
+    created = client.post("/api/v1/discrepancies", headers=auth, json={
+        "title": "Unsupported file", "description": "Check upload validation.",
+    })
+    response = client.post(
+        f"/api/v1/discrepancies/{created.json()['id']}/evidence/upload-url",
+        headers=auth,
+        json={"filename": "script.exe", "content_type": "application/octet-stream", "size_bytes": 100},
+    )
+    assert response.status_code == 415
