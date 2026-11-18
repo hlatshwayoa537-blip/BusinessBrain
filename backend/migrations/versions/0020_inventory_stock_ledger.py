@@ -43,9 +43,13 @@ def upgrade() -> None:
     )
     op.create_index("ix_inventory_movements_business_id", "inventory_movements", ["business_id"])
     op.create_index("ix_inventory_movements_inventory_item_id", "inventory_movements", ["inventory_item_id"])
+    op.add_column("purchase_order_lines", sa.Column("product_id", sa.String(36), sa.ForeignKey("inventory_items.id", ondelete="SET NULL"), nullable=True))
+    op.create_index("ix_purchase_order_lines_product_id", "purchase_order_lines", ["product_id"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_purchase_order_lines_product_id", table_name="purchase_order_lines")
+    op.drop_column("purchase_order_lines", "product_id")
     op.drop_index("ix_inventory_movements_inventory_item_id", table_name="inventory_movements")
     op.drop_index("ix_inventory_movements_business_id", table_name="inventory_movements")
     op.drop_table("inventory_movements")
