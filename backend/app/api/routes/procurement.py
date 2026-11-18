@@ -347,7 +347,14 @@ def submit_purchase_order(order_id: str, db: Session = Depends(get_db), user: Us
 def receive_purchase_order(order_id: str, payload: GoodsReceiptCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     membership = membership_for(user, db)
     require_manager(membership)
-    order = scoped_order(order_id, membership.business_id, db)
+    order = db.scalar(select(PurchaseOrder).where(PurchaseOrder.id == order_id, PurchaseOrder.business_id == membership.business_id).with_for_update())
+    if not order:
+        raise HTTPException(status_code=404, detail="Purchase order not found.")
+    prior_receipt = db.scalar(select(PurchaseOrderEvent).where(PurchaseOrderEvent.business_id == membership.business_id, PurchaseOrderEvent.idempotency_key == payload.idempotency_key))
+    if prior_receipt:
+        if prior_receipt.purchase_order_id != order.id or prior_receipt.event_type != "goods_received":
+            raise HTTPException(status_code=409, detail="This receipt key has already been used.")
+        return order_payload(order, db, include_events=True)
     if order.status not in {"submitted", "partially_received"}:
         raise HTTPException(status_code=409, detail="Only submitted purchase orders can receive goods.")
     line_ids = [row.line_id for row in payload.lines]
