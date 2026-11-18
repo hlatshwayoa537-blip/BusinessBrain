@@ -3,6 +3,7 @@ import hashlib
 import io
 import hmac
 import secrets
+import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
