@@ -39,6 +39,11 @@ class FinanceSummaryResponse(BaseModel):
     year: int
     currency: str = "ZAR"
     income_total: str
+    manual_income_total: str
+    pos_sales_total: str
+    pos_refunds_total: str
+    pos_net_income_total: str
+    pos_transaction_count: int
     expense_total: str
     net_total: str
     outstanding_income: str
