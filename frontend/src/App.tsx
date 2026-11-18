@@ -284,7 +284,8 @@ function DailyCloseWorkspace({session}:{session:AuthData}) {
         "Amounts counted/confirmed: "+Object.entries(reconciliation.actual_received||{}).map(([key,value])=>key+" R "+Number(value).toFixed(2)).join("; ")+".",
         "Variance (actual received minus current POS): "+lines.join("; ")+".",
         "This case records a difference for investigation. It does not change the daily close or POS transactions."
-      ].join("\n");
+      ].join("
+");
       await request("/discrepancies","POST",{
         daily_close_id:row.id,
         title:"POS reconciliation difference — "+row.branch_name+" · "+row.business_date,
@@ -453,7 +454,8 @@ function POSConnectionsWorkspace({session}:{session:AuthData}) {
 
 function POSCsvImport({session,connections,onImported}:{session:AuthData;connections:POSConnectionData[];onImported:()=>void}) {
   const [file,setFile]=useState<File|null>(null); const [connectionId,setConnectionId]=useState(""); const [headers,setHeaders]=useState<string[]>([]); const [mapping,setMapping]=useState<Record<string,string>>({}); const [busy,setBusy]=useState(false); const [error,setError]=useState(""); const [result,setResult]=useState<{imported:number;duplicates:number;rejected:{row:number;reason:string}[]}|null>(null);
-  async function chooseFile(next:File|null){setFile(next);setHeaders([]);setMapping({});setResult(null);setError("");if(!next)return;if(!next.name.toLowerCase().endsWith(".csv")){setError("Please choose a .csv file.");return;}if(next.size>5*1024*1024){setError("CSV files must be 5 MB or smaller.");return;}try{const first=(await next.text()).replace(/^\\uFEFF/,"").split(/\\r?\\n/,1)[0];const parsed=first.split(",").map(value=>value.trim().replace(/^"|"$/g,""));if(!parsed.length||!parsed[0])throw new Error("The CSV needs a header row.");setHeaders(parsed);const suggestions:Record<string,string>={};const aliases:Record<string,string[]>={external_transaction_id:["id","transaction id","receipt","receipt no","receipt number","transaction"],occurred_at:["date","datetime","date time","timestamp","transaction date"],gross_amount:["gross","gross amount","total","amount"],net_amount:["net","net amount","total","amount"],discount_amount:["discount","discount amount"],tax_amount:["tax","vat","tax amount"],branch_name:["branch","store","store name"],till_name:["till","terminal","register"],payment_method:["payment","payment method","tender"],transaction_type:["type","transaction type"],currency:["currency"]};for(const [field,names] of Object.entries(aliases)){const found=parsed.find(header=>names.includes(header.toLowerCase()));if(found)suggestions[field]=found;}setMapping(suggestions);}catch(e){setError(e instanceof Error?e.message:"Could not read this CSV file.");}}
+  async function chooseFile(next:File|null){setFile(next);setHeaders([]);setMapping({});setResult(null);setError("");if(!next)return;if(!next.name.toLowerCase().endsWith(".csv")){setError("Please choose a .csv file.");return;}if(next.size>5*1024*1024){setError("CSV files must be 5 MB or smaller.");return;}try{const first=(await next.text()).replace(/^\\uFEFF/,"").split(/\\r?\
+/,1)[0];const parsed=first.split(",").map(value=>value.trim().replace(/^"|"$/g,""));if(!parsed.length||!parsed[0])throw new Error("The CSV needs a header row.");setHeaders(parsed);const suggestions:Record<string,string>={};const aliases:Record<string,string[]>={external_transaction_id:["id","transaction id","receipt","receipt no","receipt number","transaction"],occurred_at:["date","datetime","date time","timestamp","transaction date"],gross_amount:["gross","gross amount","total","amount"],net_amount:["net","net amount","total","amount"],discount_amount:["discount","discount amount"],tax_amount:["tax","vat","tax amount"],branch_name:["branch","store","store name"],till_name:["till","terminal","register"],payment_method:["payment","payment method","tender"],transaction_type:["type","transaction type"],currency:["currency"]};for(const [field,names] of Object.entries(aliases)){const found=parsed.find(header=>names.includes(header.toLowerCase()));if(found)suggestions[field]=found;}setMapping(suggestions);}catch(e){setError(e instanceof Error?e.message:"Could not read this CSV file.");}}
   async function importFile(){if(!file||!connectionId)return;const required=["external_transaction_id","occurred_at","gross_amount","net_amount"];if(required.some(field=>!mapping[field])){setError("Map transaction ID, date/time, gross amount and net amount before importing.");return;}setBusy(true);setError("");setResult(null);try{const response=await fetch(API_BASE+"/pos/connections/"+connectionId+"/import-csv",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+session.access_token},body:JSON.stringify({csv_text:await file.text(),mapping})});const data=await response.json();if(!response.ok)throw new Error(data.detail||"CSV import failed.");setResult(data);onImported();}catch(e){setError(e instanceof Error?e.message:"CSV import failed.");}finally{setBusy(false);}}
   const fields:[string,string,boolean][]=[["external_transaction_id","Transaction ID",true],["occurred_at","Date / time",true],["gross_amount","Gross amount",true],["net_amount","Net amount",true],["discount_amount","Discount",false],["tax_amount","Tax / VAT",false],["branch_name","Branch / store",false],["till_name","Till / terminal",false],["payment_method","Payment method",false],["transaction_type","Transaction type",false],["currency","Currency",false]];
   return <section className="pos-workspace"><div className="profile-centre-heading"><div><div className="eyebrow">VEXION CONNECT · FILE IMPORT</div><h2>Import sales from a POS export.</h2><p>Upload an approved CSV export from your till system. Match its columns, then bring verified transactions into Sales Intelligence.</p></div><span className="profile-status">CSV · up to 5 MB</span></div><div className="pos-create-form"><label>POS connection<select value={connectionId} onChange={e=>setConnectionId(e.target.value)} required><option value="">Choose a connection</option>{connections.filter(item=>item.status!=="disabled").map(item=><option key={item.id} value={item.id}>{item.display_name} · {item.provider_name}</option>)}</select></label><label>Choose POS CSV export<input type="file" accept=".csv,text/csv" onChange={e=>void chooseFile(e.target.files?.[0]??null)}/></label>{file&&<p className="directory-message">{file.name} · {(file.size/1024).toFixed(1)} KB · {headers.length} columns detected</p>}{headers.length>0&&<div className="profile-fields-grid">{fields.map(([field,label,required])=><label key={field}>{label}{required?" *":" optional"}<select value={mapping[field]||""} onChange={e=>setMapping(current=>({...current,[field]:e.target.value}))}><option value="">Not mapped</option>{headers.map(header=><option key={header} value={header}>{header}</option>)}</select></label>)}</div>}{error&&<p className="finance-alert" role="alert">{error}</p>}<button className="auth-submit" type="button" disabled={busy||!file||!connectionId||headers.length===0} onClick={()=>void importFile()}>{busy?"Importing transactions…":"Validate and import CSV"} <ArrowUpRight size={16}/></button>{result&&<div className="finance-success" role="status"><strong>Import completed.</strong> {result.imported} imported · {result.duplicates} duplicates skipped · {result.rejected.length} rejected.{result.rejected.length>0&&<ul>{result.rejected.slice(0,8).map(item=><li key={item.row}>Row {item.row}: {item.reason}</li>)}</ul>}</div>}<p className="finance-disclaimer">Only import sales exports you are authorised to share. VEXION does not import card numbers or customer payment credentials. CSV imports use the same duplicate checks as connected POS feeds.</p></div></section>;
@@ -894,7 +896,9 @@ type PurchaseOrderRecord = { id:string; reference:string; supplier_id:string; su
 type PurchaseLineDraft = { description:string; product_id:string; quantity:string; unit_price:string; tax_rate:string };
 
 function SupplierPurchasingWorkspace({session}:{session:AuthData}) {
-  const [suppliers,setSuppliers]=useState<SupplierRecord[]>([]);\n  const [inventoryItems,setInventoryItems]=useState<InventoryItemRecord[]>([]);\n  const [receiptLocation,setReceiptLocation]=useState("Main");
+  const [suppliers,setSuppliers]=useState<SupplierRecord[]>([]);
+  const [inventoryItems,setInventoryItems]=useState<InventoryItemRecord[]>([]);
+  const [receiptLocation,setReceiptLocation]=useState("Main");
   const [orders,setOrders]=useState<PurchaseOrderRecord[]>([]);
   const [supplierName,setSupplierName]=useState("");
   const [supplierContact,setSupplierContact]=useState("");
@@ -941,7 +945,7 @@ function SupplierPurchasingWorkspace({session}:{session:AuthData}) {
     try {
       const created=await request("/procurement/purchase-orders","POST",{supplier_id:selectedSupplier,expected_delivery_date:expectedDate||null,notes:orderNotes||null,lines:lines.map(line=>({...line,product_id:line.product_id||null,quantity:Number(line.quantity),unit_price:Number(line.unit_price),tax_rate:Number(line.tax_rate)}))}) as PurchaseOrderRecord;
       setMessage("Draft "+created.reference+" created. Review it before submitting to the supplier.");
-      setExpectedDate("");setOrderNotes("");setLines([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);await refresh();
+      setExpectedDate("");setOrderNotes("");setLines([{description:"",product_id:"",quantity:"1",unit_price:"",tax_rate:"15"}]);await refresh();
     } catch(err) {setError(err instanceof Error?err.message:"Purchase order could not be created.");}
     finally {setBusy(false);}
   }
@@ -985,7 +989,7 @@ function SupplierPurchasingWorkspace({session}:{session:AuthData}) {
           <div className="finance-toolbar"><label>Qty<input type="number" min="0.001" step="0.001" required value={line.quantity} onChange={e=>updateLine(index,"quantity",e.target.value)}/></label><label>Unit price (R)<input type="number" min="0" step="0.01" required value={line.unit_price} onChange={e=>updateLine(index,"unit_price",e.target.value)}/></label><label>VAT %<input type="number" min="0" max="100" step="0.01" value={line.tax_rate} onChange={e=>updateLine(index,"tax_rate",e.target.value)}/></label></div>
           {lines.length>1&&<button type="button" className="network-secondary-button" onClick={()=>setLines(current=>current.filter((_,i)=>i!==index))}>Remove line</button>}
         </div>)}
-        <button type="button" className="network-secondary-button" onClick={()=>setLines(current=>[...current,{description:"",quantity:"1",unit_price:"",tax_rate:"15"}])}>Add another line</button>
+        <button type="button" className="network-secondary-button" onClick={()=>setLines(current=>[...current,{description:"",product_id:"",quantity:"1",unit_price:"",tax_rate:"15"}])}>Add another line</button>
         <button className="network-primary-button" disabled={busy||!selectedSupplier||lines.some(line=>!line.description.trim()||!line.unit_price)}>{busy?"Saving…":"Save draft purchase order"}</button>
       </form>
     </div>
@@ -1052,7 +1056,7 @@ export default function App() {
   const [quoteCurrency, setQuoteCurrency] = useState("ZAR");
   const [quoteValidUntil, setQuoteValidUntil] = useState("");
   const [quoteNotes, setQuoteNotes] = useState("");
-  const [quoteLines, setQuoteLines] = useState<QuoteLineDraft[]>([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
+  const [quoteLines, setQuoteLines] = useState<QuoteLineDraft[]>([{description:"",product_id:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
   const [inviteTarget, setInviteTarget] = useState<PublicBusiness | null>(null);
   const [invitePassword, setInvitePassword] = useState("");
   const [inviteMessage, setInviteMessage] = useState("");
@@ -1459,7 +1463,8 @@ export default function App() {
       <ReferralWorkspace session={session} />
       <SalesIntelligenceWorkspace session={session} />
       <InvoiceWorkspace session={session} />
-      <InventoryWorkspace session={session} />\n      <SupplierPurchasingWorkspace session={session} />
+      <InventoryWorkspace session={session} />
+      <SupplierPurchasingWorkspace session={session} />
       <FinanceWorkspace session={session} />
       <section className="profile-centre" id="business-profile">
         <div className="profile-centre-heading"><div><div className="eyebrow">BUSINESS IDENTITY</div><h2>Business Profile & Onboarding</h2><p>Complete your business details. You control what information is shared publicly later.</p></div><span className="profile-status">Editable anytime</span></div>
