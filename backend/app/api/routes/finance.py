@@ -1,12 +1,12 @@
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.api.routes.auth import get_current_user
 from app.db import get_db
-from app.models import FinanceTransaction, Membership, User
+from app.models import FinanceTransaction, Membership, POSTransaction, User
 from app.schemas_finance import FinanceSummaryResponse, FinanceTransactionCreate, FinanceTransactionResponse
 
 router = APIRouter(prefix="/finance", tags=["finance"])
@@ -106,6 +106,24 @@ def finance_summary(
     outstanding_income = ZERO
     unpaid_expenses = ZERO
     monthly = defaultdict(lambda: {"income": ZERO, "expenses": ZERO})
+    pos_sales = ZERO
+    pos_refunds = ZERO
+    pos_transaction_count = 0
+    pos_rows = db.scalars(select(POSTransaction).where(
+        POSTransaction.business_id == membership.business_id,
+        POSTransaction.occurred_at >= datetime(selected_year, 1, 1, tzinfo=timezone.utc),
+        POSTransaction.occurred_at < datetime(selected_year + 1, 1, 1, tzinfo=timezone.utc),
+        POSTransaction.currency == "ZAR",
+    )).all()
+    for pos_record in pos_rows:
+        if pos_record.transaction_type == "sale":
+            pos_sales += Decimal(pos_record.net_amount)
+            monthly[pos_record.occurred_at.month]["income"] += Decimal(pos_record.net_amount)
+            pos_transaction_count += 1
+        elif pos_record.transaction_type == "refund":
+            pos_refunds += Decimal(pos_record.net_amount)
+            monthly[pos_record.occurred_at.month]["income"] -= Decimal(pos_record.net_amount)
+            pos_transaction_count += 1
     for record in records:
         amount = Decimal(record.amount)
         if record.kind == "income":
@@ -121,7 +139,12 @@ def finance_summary(
             unpaid_expenses += amount
     return FinanceSummaryResponse(
         year=selected_year,
-        income_total=f"{income:.2f}",
+        income_total=f"{income + pos_sales - pos_refunds:.2f}",
+        manual_income_total=f"{income:.2f}",
+        pos_sales_total=f"{pos_sales:.2f}",
+        pos_refunds_total=f"{pos_refunds:.2f}",
+        pos_net_income_total=f"{pos_sales - pos_refunds:.2f}",
+        pos_transaction_count=pos_transaction_count,
         expense_total=f"{expenses:.2f}",
         net_total=f"{income - expenses:.2f}",
         outstanding_income=f"{outstanding_income:.2f}",
