@@ -53,6 +53,7 @@ def item_payload(item: InventoryItem, db: Session) -> dict:
         "reorder_level": f"{reorder:.3f}", "is_active": item.is_active,
         "stock_total": f"{total:.3f}", "stock_by_location": by_location,
         "below_reorder_level": reorder > 0 and total <= reorder,
+        "negative_stock": total < 0,
         "created_at": item.created_at, "updated_at": item.updated_at,
     }
 

@@ -124,3 +124,56 @@ def test_csv_import_rejects_invalid_rows(client):
     assert response.status_code == 200
     assert response.json()["imported"] == 0
     assert len(response.json()["rejected"]) == 1
+
+
+def test_item_level_pos_sales_deduct_mapped_stock_once_and_refunds_do_not_restock(client):
+    headers = auth_headers(client, "pos-item-lines@example.com")
+    item = client.post("/api/v1/inventory/items", headers=headers, json={
+        "name": "Coffee 500g", "sku": "COF-500", "unit": "pack"
+    })
+    assert item.status_code == 201
+    item_id = item.json()["id"]
+    opening = client.post(f"/api/v1/inventory/items/{item_id}/adjustments", headers=headers, json={
+        "quantity_delta": "10", "location": "Durban Branch", "reason": "Verified opening stock count"
+    })
+    assert opening.status_code == 201
+
+    connection = create_pos_connection(client, headers).json()
+    secret = connection["webhook_secret"]
+    sale = {
+        "external_transaction_id": "ITEM-SALE-001",
+        "branch_name": "Durban Branch", "till_name": "Till 1",
+        "transaction_type": "sale", "occurred_at": "2026-11-18T10:00:00+02:00",
+        "currency": "ZAR", "gross_amount": "85.00", "net_amount": "85.00",
+        "items": [
+            {"sku": "COF-500", "description": "Coffee 500g", "quantity": "3", "unit_price": "25.00"},
+            {"sku": "UNKNOWN-1", "description": "Unmapped item", "quantity": "2", "unit_price": "5.00"}
+        ]
+    }
+    accepted = client.post(f"/api/v1/pos/ingest/{connection['id']}", headers={"X-Vexion-Secret": secret}, json=sale)
+    assert accepted.status_code == 201
+    assert len(accepted.json()["items"]) == 2
+    assert accepted.json()["items"][0]["inventory_item_id"] == item_id
+    assert accepted.json()["items"][1]["inventory_item_id"] is None
+
+    duplicate = client.post(f"/api/v1/pos/ingest/{connection['id']}", headers={"X-Vexion-Secret": secret}, json=sale)
+    assert duplicate.status_code == 409
+    stock = client.get("/api/v1/inventory/items", headers=headers)
+    assert stock.json()[0]["stock_total"] == "7.000"
+    assert stock.json()[0]["stock_by_location"] == {"Durban Branch": "7.000"}
+
+    refund = {
+        **sale, "external_transaction_id": "ITEM-REFUND-001", "transaction_type": "refund",
+        "gross_amount": "25.00", "net_amount": "25.00",
+        "items": [{"sku": "COF-500", "description": "Coffee 500g refund", "quantity": "1", "unit_price": "25.00"}]
+    }
+    refunded = client.post(f"/api/v1/pos/ingest/{connection['id']}", headers={"X-Vexion-Secret": secret}, json=refund)
+    assert refunded.status_code == 201
+    stock_after_refund = client.get("/api/v1/inventory/items", headers=headers)
+    assert stock_after_refund.json()[0]["stock_total"] == "7.000"
+
+    movements = client.get("/api/v1/inventory/movements", headers=headers)
+    pos_movements = [row for row in movements.json() if row["source_type"] == "pos_transaction"]
+    assert len(pos_movements) == 1
+    assert pos_movements[0]["movement_type"] == "pos_sale"
+    assert pos_movements[0]["quantity_delta"] == "-3.000"

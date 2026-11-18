@@ -24,6 +24,25 @@ class POSConnectionResponse(BaseModel):
 class POSConnectionCreated(POSConnectionResponse):
     webhook_secret: str
 
+class POSIngestLine(BaseModel):
+    sku: str | None = Field(default=None, max_length=80)
+    description: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=240)]
+    quantity: Decimal = Field(gt=0, max_digits=14, decimal_places=3)
+    unit_price: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
+
+
+class POSIngestLineResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    line_number: int
+    sku: str | None = None
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    line_total: Decimal
+    inventory_item_id: str | None = None
+
+
 class POSIngestTransaction(BaseModel):
     external_transaction_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=180)]
     branch_name: str | None = Field(default=None, max_length=160)
@@ -36,6 +55,7 @@ class POSIngestTransaction(BaseModel):
     tax_amount: Decimal = Field(default=Decimal("0"), ge=0, max_digits=14, decimal_places=2)
     net_amount: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
     payment_method: str | None = Field(default=None, max_length=60)
+    items: list[POSIngestLine] = Field(default_factory=list, max_length=200)
 
 class POSTransactionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -52,6 +72,7 @@ class POSTransactionResponse(BaseModel):
     tax_amount: Decimal
     net_amount: Decimal
     payment_method: str | None = None
+    items: list[POSIngestLineResponse] = Field(default_factory=list, validation_alias="lines")
 
 class POSSalesSummary(BaseModel):
     currency: str = "ZAR"
