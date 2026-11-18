@@ -1,5 +1,7 @@
+import io
 import socket
 import struct
+import zipfile
 from functools import lru_cache
 
 import boto3
@@ -32,6 +34,54 @@ def presigned_upload(key: str, content_type: str, max_bytes: int) -> dict:
 
 def object_head(key: str):
     return s3_client().head_object(Bucket=settings.s3_bucket, Key=key)
+
+def validate_object_content(key: str, extension: str) -> None:
+    """Verify file bytes match the permitted format before malware scanning."""
+    response = s3_client().get_object(Bucket=settings.s3_bucket, Key=key)
+    try:
+        body = response["Body"]
+        chunks = []
+        total = 0
+        while True:
+            chunk = body.read(64 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > 25 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="Evidence file exceeds the 25 MB limit.")
+            chunks.append(chunk)
+        data = b"".join(chunks)
+    finally:
+        response["Body"].close()
+
+    valid = False
+    if extension == ".pdf":
+        valid = data.startswith(b"%PDF-")
+    elif extension == ".png":
+        valid = data.startswith(b"\\x89PNG\\r\\n\\x1a\\n")
+    elif extension in {".jpg", ".jpeg"}:
+        valid = data.startswith(b"\\xff\\xd8\\xff")
+    elif extension in {".txt", ".csv"}:
+        try:
+            data.decode("utf-8-sig")
+            valid = b"\\x00" not in data
+        except UnicodeDecodeError:
+            valid = False
+    elif extension in {".docx", ".xlsx", ".pptx"}:
+        required = {
+            ".docx": "word/document.xml",
+            ".xlsx": "xl/workbook.xml",
+            ".pptx": "ppt/presentation.xml",
+        }[extension]
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                names = set(archive.namelist())
+                valid = "[Content_Types].xml" in names and required in names
+        except (zipfile.BadZipFile, OSError):
+            valid = False
+
+    if not valid:
+        raise HTTPException(status_code=422, detail="File contents do not match the selected file type.")
 
 def scan_object_with_clamav(key: str) -> None:
     if not settings.clamav_host:
