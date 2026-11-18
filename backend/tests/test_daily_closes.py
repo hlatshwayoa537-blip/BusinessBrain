@@ -96,3 +96,68 @@ def test_daily_close_is_business_scoped(client):
     saved = client.post("/api/v1/daily-closes", headers=headers(owner), json=manual_payload()).json()
     response = client.get(f"/api/v1/daily-closes/{saved['id']}/audit", headers=headers(other))
     assert response.status_code == 404
+
+
+
+def test_daily_close_reconciliation_detects_late_pos_transactions_without_mutating_close(client):
+    owner = register(client, "daily-close-reconcile@example.com", "Reconcile Owner", "Reconcile Store")
+    auth = headers(owner)
+    connection_response = client.post("/api/v1/pos/connections", headers=auth, json={
+        "provider_name": "Test POS", "display_name": "Main till", "integration_method": "webhook"
+    })
+    assert connection_response.status_code == 201
+    connection = connection_response.json()
+    secret = connection["webhook_secret"]
+    base = {
+        "branch_name": "Main branch", "till_name": "Till 1",
+        "occurred_at": "2026-11-17T10:00:00+02:00", "currency": "ZAR",
+        "gross_amount": "100.00", "discount_amount": "0.00", "tax_amount": "0.00",
+        "net_amount": "100.00", "payment_method": "cash",
+    }
+    sale = {**base, "external_transaction_id": "RECON-001", "transaction_type": "sale"}
+    accepted = client.post(
+        f"/api/v1/pos/ingest/{connection['id']}",
+        headers={"X-Vexion-Secret": secret}, json=sale
+    )
+    assert accepted.status_code == 201
+
+    saved = client.post("/api/v1/daily-closes", headers=auth, json={
+        "business_date": "2026-11-17", "branch_name": "Main branch",
+        "actual_cash": "95.00", "actual_card": "0.00", "actual_other": "0.00",
+    })
+    assert saved.status_code == 201
+    close = saved.json()
+    initial = client.get(f"/api/v1/daily-closes/{close['id']}/reconciliation", headers=auth)
+    assert initial.status_code == 200
+    assert initial.json()["status"] == "reconciled"
+    assert initial.json()["pos_totals"]["cash"] == "100.00"
+    assert initial.json()["variance_vs_pos"]["cash"] == "-5.00"
+
+    late_sale = {**base, "external_transaction_id": "RECON-002", "transaction_type": "sale", "net_amount": "20.00", "gross_amount": "20.00"}
+    accepted = client.post(
+        f"/api/v1/pos/ingest/{connection['id']}",
+        headers={"X-Vexion-Secret": secret}, json=late_sale
+    )
+    assert accepted.status_code == 201
+    refreshed = client.get(f"/api/v1/daily-closes/{close['id']}/reconciliation", headers=auth)
+    assert refreshed.status_code == 200
+    assert refreshed.json()["status"] == "source_changed"
+    assert refreshed.json()["pos_totals"]["cash"] == "120.00"
+
+    after = client.get("/api/v1/daily-closes?business_date=2026-11-17", headers=auth).json()[0]
+    assert after["id"] == close["id"]
+    assert after["expected_cash"] == "100.00"
+
+
+def test_daily_close_reconciliation_marks_manual_baseline_unverifiable(client):
+    owner = register(client, "daily-close-manual-reconcile@example.com", "Manual Owner", "Manual Store")
+    saved = client.post("/api/v1/daily-closes", headers=headers(owner), json=manual_payload())
+    assert saved.status_code == 201
+    result = client.get(
+        f"/api/v1/daily-closes/{saved.json()['id']}/reconciliation",
+        headers=headers(owner),
+    )
+    assert result.status_code == 200
+    assert result.json()["status"] == "manual_baseline"
+    assert result.json()["pos_totals"] is None
+    assert result.json()["variance_vs_pos"] is None
