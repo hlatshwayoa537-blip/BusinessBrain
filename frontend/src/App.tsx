@@ -959,7 +959,7 @@ function SupplierPurchasingWorkspace({session}:{session:AuthData}) {
     if(!quantity||Number(quantity)<=0){setError("Enter the quantity actually received.");return;}
     setError("");setMessage("");
     try {
-      await request("/procurement/purchase-orders/"+order.id+"/receive","POST",{lines:[{line_id:line.id,quantity:Number(quantity)}],location:receiptLocation});
+      await request("/procurement/purchase-orders/"+order.id+"/receive","POST",{lines:[{line_id:line.id,quantity:Number(quantity)}],location:receiptLocation,idempotency_key:crypto.randomUUID()});
       setReceiveQuantities(current=>({...current,[line.id]:""}));setMessage("Goods receipt recorded for "+order.reference+".");await refresh();
     } catch(err){setError(err instanceof Error?err.message:"Goods receipt could not be recorded.");}
   }
