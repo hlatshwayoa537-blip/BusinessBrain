@@ -146,7 +146,7 @@ def finance_summary(
         pos_net_income_total=f"{pos_sales - pos_refunds:.2f}",
         pos_transaction_count=pos_transaction_count,
         expense_total=f"{expenses:.2f}",
-        net_total=f"{income - expenses:.2f}",
+        net_total=f"{income + pos_sales - pos_refunds - expenses:.2f}",
         outstanding_income=f"{outstanding_income:.2f}",
         unpaid_expenses=f"{unpaid_expenses:.2f}",
         transaction_count=len(records),
