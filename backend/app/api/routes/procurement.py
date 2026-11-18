@@ -29,11 +29,11 @@ def require_manager(membership: Membership) -> None:
         raise HTTPException(status_code=403, detail="Only an owner, administrator or manager can change procurement records.")
 
 
-def add_event(db: Session, order: PurchaseOrder, user: User, event_type: str, details: dict | None = None) -> PurchaseOrderEvent:
+def add_event(db: Session, order: PurchaseOrder, user: User, event_type: str, details: dict | None = None, idempotency_key: str | None = None) -> PurchaseOrderEvent:
     event = PurchaseOrderEvent(
         id=str(uuid.uuid4()), purchase_order_id=order.id, business_id=order.business_id,
         actor_user_id=user.id, event_type=event_type,
-        details_json=json.dumps(details or {}, sort_keys=True),
+        details_json=json.dumps(details or {}, sort_keys=True), idempotency_key=idempotency_key,
     )
     db.add(event)
     return event
@@ -171,6 +171,7 @@ class GoodsReceiptCreate(BaseModel):
     lines: list[ReceiptLineInput] = Field(min_length=1, max_length=100)
     note: str | None = Field(default=None, max_length=2000)
     location: str = Field(default="Main", min_length=1, max_length=120)
+    idempotency_key: str = Field(min_length=16, max_length=80)
 
 
 @router.get("/suppliers")
