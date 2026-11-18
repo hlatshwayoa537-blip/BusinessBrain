@@ -126,6 +126,7 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [reports, setReports] = useState<{pnl:any;cash:any;vat:any}|null>(null);
   async function request(path: string, method = "GET", body?: unknown) {
     const response = await fetch(API_BASE + path, { method, headers: { Authorization: "Bearer " + session.access_token, ...(body ? {"Content-Type":"application/json"} : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     if (response.status === 204) return null;
@@ -136,8 +137,8 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
   async function loadFinance() {
     setLoading(true); setError("");
     try {
-      const [rows, totals] = await Promise.all([request("/finance/transactions?year=" + year + (kindFilter === "all" ? "" : "&kind=" + kindFilter)), request("/finance/summary?year=" + year)]);
-      setRecords(rows as FinanceRecord[]); setSummary(totals as FinanceSummary);
+      const [rows, totals, pnl, cash, vat] = await Promise.all([request("/finance/transactions?year=" + year + (kindFilter === "all" ? "" : "&kind=" + kindFilter)), request("/finance/summary?year=" + year), request("/financial-reports/profit-loss?year=" + year), request("/financial-reports/cash-flow?year=" + year), request("/financial-reports/vat?year=" + year)]);
+      setRecords(rows as FinanceRecord[]); setSummary(totals as FinanceSummary); setReports({pnl, cash, vat});
     } catch (err) { setError(err instanceof Error ? err.message : "Could not load financial records."); }
     finally { setLoading(false); }
   }
@@ -165,6 +166,17 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
     <div className="finance-toolbar"><label>Reporting year<select value={year} onChange={e=>setYear(Number(e.target.value))}>{Array.from({length: Math.max(0, new Date().getFullYear() + 5 - 2000 + 1)}, (_, index) => new Date().getFullYear() + 5 - index).map(value=><option key={value} value={value}>{value}</option>)}</select></label><button type="button" className="network-secondary-button" onClick={()=>void loadFinance()}>Refresh records</button></div>
     {error && <p className="finance-alert" role="alert">{error}</p>}{message && <p className="finance-success" role="status">{message}</p>}
     <div className="finance-stats"><article><span>Total income</span><strong>{displayedMoney(summary?.income_total)}</strong><small>POS net sales + other paid income</small></article><article><span>POS sales</span><strong>{posDataAvailable ? money(summary?.pos_sales_total ?? 0) : "—"}</strong><small>{posDataAvailable ? `${summary?.pos_transaction_count ?? 0} POS sales/refunds · before refunds` : "No POS sales/refunds received for this year"}</small></article><article><span>POS refunds</span><strong>{posDataAvailable ? money(summary?.pos_refunds_total ?? 0) : "—"}</strong><small>{posDataAvailable ? "Deducted from POS income" : "No POS refund data received for this year"}</small></article><article><span>Expenses paid</span><strong>{displayedMoney(summary?.expense_total)}</strong><small>Paid expenses recorded</small></article><article><span>Net recorded result</span><strong className={Number(summary?.net_total ?? 0)>=0?"finance-positive":"finance-negative"}>{displayedMoney(summary?.net_total)}</strong><small>Income less paid expenses</small></article><article><span>Outstanding income</span><strong>{displayedMoney(summary?.outstanding_income)}</strong><small>Income marked unpaid</small></article></div>
+    {reports && <div className="finance-stats">
+      <article><span>Profit &amp; loss</span><strong>{money(reports.pnl.net_result)}</strong><small>Recorded revenue less paid manual expenses</small></article>
+      <article><span>Recorded operating cash flow</span><strong>{money(reports.cash.recorded_operating_flows.net_recorded_flow)}</strong><small>POS takings/refunds and paid manual records; not bank-settled cash</small></article>
+      <article><span>Output VAT on issued invoices</span><strong>{money(reports.vat.output_vat_on_issued_invoices)}</strong><small>{reports.vat.issued_invoice_count} issued invoices · input VAT not yet tracked</small></article>
+    </div>}
+    {reports && <div className="finance-report" style={{marginBottom:24}}>
+      <div className="recruitment-card-heading"><div><span className="eyebrow">REPORTING TRANSPARENCY</span><h3>What these figures include</h3></div></div>
+      <p>Profit &amp; loss uses POS sales and refunds plus paid manual income and expenses. Unpaid records are excluded. Purchase orders are not treated as expenses or cost of goods sold.</p>
+      <p>Cash flow is a record-based operating movement, not a bank reconciliation. Bank data is not connected.</p>
+      <p>VAT currently reports output VAT on issued VEXION invoices only. Input VAT and a VAT payable estimate are withheld until supplier tax invoices and verified purchase VAT are recorded.</p>
+    </div>}
     <div className="finance-layout">
       <form className="finance-form" onSubmit={addRecord}><div className="recruitment-card-heading"><div><span className="eyebrow">NEW FINANCIAL RECORD</span><h3>Record other income or expense</h3></div></div>
         <div className="finance-kind-toggle"><button type="button" className={kind==="income"?"selected":""} onClick={()=>setKind("income")}>Income</button><button type="button" className={kind==="expense"?"selected":""} onClick={()=>setKind("expense")}>Expense</button></div>
