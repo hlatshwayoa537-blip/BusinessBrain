@@ -468,7 +468,7 @@ class PurchaseOrderEvent(Base):
     actor_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     event_type: Mapped[str] = mapped_column(String(32), nullable=False)
     details_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    idempotency_key: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 class InventoryItem(Base):
