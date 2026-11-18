@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.routes.auth import get_current_user
 from app.db import get_db
-from app.models import Membership, PurchaseOrder, PurchaseOrderEvent, PurchaseOrderLine, Supplier, User
+from app.models import InventoryItem, InventoryMovement, Membership, PurchaseOrder, PurchaseOrderEvent, PurchaseOrderLine, Supplier, User
 
 router = APIRouter(prefix="/procurement", tags=["supplier and purchasing"])
 MANAGERS = {"owner", "admin", "manager"}
@@ -29,12 +29,14 @@ def require_manager(membership: Membership) -> None:
         raise HTTPException(status_code=403, detail="Only an owner, administrator or manager can change procurement records.")
 
 
-def add_event(db: Session, order: PurchaseOrder, user: User, event_type: str, details: dict | None = None) -> None:
-    db.add(PurchaseOrderEvent(
+def add_event(db: Session, order: PurchaseOrder, user: User, event_type: str, details: dict | None = None, idempotency_key: str | None = None) -> PurchaseOrderEvent:
+    event = PurchaseOrderEvent(
         id=str(uuid.uuid4()), purchase_order_id=order.id, business_id=order.business_id,
         actor_user_id=user.id, event_type=event_type,
-        details_json=json.dumps(details or {}, sort_keys=True),
-    ))
+        details_json=json.dumps(details or {}, sort_keys=True), idempotency_key=idempotency_key,
+    )
+    db.add(event)
+    return event
 
 
 def supplier_payload(item: Supplier) -> dict:
@@ -54,7 +56,7 @@ def line_payload(line: PurchaseOrderLine) -> dict:
     subtotal = quantity * price
     tax = subtotal * tax_rate / Decimal("100")
     return {
-        "id": line.id, "description": line.description,
+        "id": line.id, "product_id": line.product_id, "description": line.description,
         "quantity_ordered": f"{quantity:.3f}", "quantity_received": f"{received:.3f}",
         "quantity_outstanding": f"{quantity - received:.3f}",
         "unit_price": f"{price:.2f}", "tax_rate": f"{tax_rate:.2f}",
@@ -143,6 +145,7 @@ class PurchaseOrderLineInput(BaseModel):
     quantity: Decimal = Field(gt=0, max_digits=14, decimal_places=3)
     unit_price: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
     tax_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100, max_digits=5, decimal_places=2)
+    product_id: str | None = None
 
 
 class PurchaseOrderCreate(BaseModel):
@@ -167,6 +170,8 @@ class ReceiptLineInput(BaseModel):
 class GoodsReceiptCreate(BaseModel):
     lines: list[ReceiptLineInput] = Field(min_length=1, max_length=100)
     note: str | None = Field(default=None, max_length=2000)
+    location: str = Field(default="Main", min_length=1, max_length=120)
+    idempotency_key: str = Field(min_length=16, max_length=80)
 
 
 @router.get("/suppliers")
@@ -241,6 +246,14 @@ def create_purchase_order(payload: PurchaseOrderCreate, db: Session = Depends(ge
     membership = membership_for(user, db)
     require_manager(membership)
     scoped_supplier(payload.supplier_id, membership.business_id, db, active=True)
+    for line in payload.lines:
+        if line.product_id:
+            db_item = db.scalar(select(InventoryItem).where(
+                InventoryItem.id == line.product_id, InventoryItem.business_id == membership.business_id,
+                InventoryItem.is_active.is_(True),
+            ))
+            if not db_item:
+                raise HTTPException(status_code=404, detail="Linked inventory item not found.")
     order = PurchaseOrder(
         id=str(uuid.uuid4()), business_id=membership.business_id, supplier_id=payload.supplier_id,
         reference=f"PO-{date.today():%Y%m%d}-{uuid.uuid4().hex[:6].upper()}",
@@ -254,6 +267,7 @@ def create_purchase_order(payload: PurchaseOrderCreate, db: Session = Depends(ge
             id=str(uuid.uuid4()), purchase_order_id=order.id, business_id=membership.business_id,
             description=line.description.strip(), quantity_ordered=line.quantity,
             quantity_received=Decimal("0"), unit_price=line.unit_price, tax_rate=line.tax_rate,
+            product_id=line.product_id,
         ))
     add_event(db, order, user, "created", {"line_count": len(payload.lines), "status": "draft"})
     db.commit()
@@ -287,10 +301,19 @@ def update_purchase_order(order_id: str, payload: PurchaseOrderUpdate, db: Sessi
             PurchaseOrderLine.purchase_order_id == order.id, PurchaseOrderLine.business_id == membership.business_id,
         ))
         for line in changes["lines"]:
+            product_id = line.get("product_id")
+            if product_id:
+                db_item = db.scalar(select(InventoryItem).where(
+                    InventoryItem.id == product_id, InventoryItem.business_id == membership.business_id,
+                    InventoryItem.is_active.is_(True),
+                ))
+                if not db_item:
+                    raise HTTPException(status_code=404, detail="Linked inventory item not found.")
             db.add(PurchaseOrderLine(
                 id=str(uuid.uuid4()), purchase_order_id=order.id, business_id=membership.business_id,
                 description=line["description"].strip(), quantity_ordered=line["quantity"],
-                quantity_received=Decimal("0"), unit_price=line["unit_price"], tax_rate=line.get("tax_rate", Decimal("0")),
+                quantity_received=Decimal("0"), unit_price=line["unit_price"],
+                tax_rate=line.get("tax_rate", Decimal("0")), product_id=product_id,
             ))
     order.updated_at = datetime.now(timezone.utc)
     add_event(db, order, user, "updated", {"fields": sorted(changes.keys())})
@@ -324,7 +347,14 @@ def submit_purchase_order(order_id: str, db: Session = Depends(get_db), user: Us
 def receive_purchase_order(order_id: str, payload: GoodsReceiptCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     membership = membership_for(user, db)
     require_manager(membership)
-    order = scoped_order(order_id, membership.business_id, db)
+    order = db.scalar(select(PurchaseOrder).where(PurchaseOrder.id == order_id, PurchaseOrder.business_id == membership.business_id).with_for_update())
+    if not order:
+        raise HTTPException(status_code=404, detail="Purchase order not found.")
+    prior_receipt = db.scalar(select(PurchaseOrderEvent).where(PurchaseOrderEvent.business_id == membership.business_id, PurchaseOrderEvent.idempotency_key == payload.idempotency_key))
+    if prior_receipt:
+        if prior_receipt.purchase_order_id != order.id or prior_receipt.event_type != "goods_received":
+            raise HTTPException(status_code=409, detail="This receipt key has already been used.")
+        return order_payload(order, db, include_events=True)
     if order.status not in {"submitted", "partially_received"}:
         raise HTTPException(status_code=409, detail="Only submitted purchase orders can receive goods.")
     line_ids = [row.line_id for row in payload.lines]
@@ -357,7 +387,24 @@ def receive_purchase_order(order_id: str, payload: GoodsReceiptCreate, db: Sessi
     if fully_received:
         order.received_at = datetime.now(timezone.utc)
     order.updated_at = datetime.now(timezone.utc)
-    add_event(db, order, user, "goods_received", {"lines": received_details, "note": payload.note})
+    location = payload.location.strip()
+    if not location:
+        raise HTTPException(status_code=422, detail="Enter a stock location.")
+    receipt_event = add_event(db, order, user, "goods_received", {
+        "lines": received_details, "note": payload.note, "location": location,
+    }, idempotency_key=payload.idempotency_key)
+    for receipt in payload.lines:
+        line = by_id[receipt.line_id]
+        if line.product_id:
+            db.add(InventoryMovement(
+                id=str(uuid.uuid4()), business_id=membership.business_id,
+                inventory_item_id=line.product_id, movement_type="purchase_receipt",
+                quantity_delta=receipt.quantity, location=location,
+                source_type="purchase_order", source_id=order.id,
+                source_event_id=receipt_event.id, source_line_id=line.id,
+                note=f"Goods received against {order.reference}",
+                created_by_user_id=user.id,
+            ))
     db.commit()
     db.refresh(order)
     return order_payload(order, db, include_events=True)
