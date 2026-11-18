@@ -290,7 +290,7 @@ def update_purchase_order(order_id: str, payload: PurchaseOrderUpdate, db: Sessi
             db.add(PurchaseOrderLine(
                 id=str(uuid.uuid4()), purchase_order_id=order.id, business_id=membership.business_id,
                 description=line["description"].strip(), quantity_ordered=line["quantity"],
-                quantity_received=Decimal("0"), unit_price=line["unit_price"], tax_rate=line["tax_rate"],
+                quantity_received=Decimal("0"), unit_price=line["unit_price"], tax_rate=line.get("tax_rate", Decimal("0")),
             ))
     order.updated_at = datetime.now(timezone.utc)
     add_event(db, order, user, "updated", {"fields": sorted(changes.keys())})
