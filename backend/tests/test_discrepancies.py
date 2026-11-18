@@ -167,3 +167,24 @@ def test_discrepancy_evidence_rejects_unsupported_file_type(client):
         json={"filename": "script.exe", "content_type": "application/octet-stream", "size_bytes": 100},
     )
     assert response.status_code == 415
+
+
+def test_private_evidence_content_validation_checks_file_signature(monkeypatch):
+    import io
+    import pytest
+    from fastapi import HTTPException
+    from app.services import private_storage
+
+    class FakeS3:
+        def __init__(self, payload):
+            self.payload = payload
+        def get_object(self, **kwargs):
+            return {"Body": io.BytesIO(self.payload)}
+
+    monkeypatch.setattr(private_storage, "s3_client", lambda: FakeS3(b"%PDF-1.7\\nvalid header"))
+    private_storage.validate_object_content("quarantine/test", ".pdf")
+
+    monkeypatch.setattr(private_storage, "s3_client", lambda: FakeS3(b"<html>not a pdf</html>"))
+    with pytest.raises(HTTPException) as error:
+        private_storage.validate_object_content("quarantine/test", ".pdf")
+    assert error.value.status_code == 422
