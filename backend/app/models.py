@@ -236,6 +236,23 @@ class POSTransaction(Base):
     net_amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
     payment_method: Mapped[str | None] = mapped_column(String(60), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    lines: Mapped[list["POSTransactionLine"]] = relationship(back_populates="transaction", cascade="all, delete-orphan")
+
+
+class POSTransactionLine(Base):
+    __tablename__ = "pos_transaction_lines"
+    __table_args__ = (UniqueConstraint("transaction_id", "line_number", name="uq_pos_transaction_line_number"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    transaction_id: Mapped[str] = mapped_column(ForeignKey("pos_transactions.id", ondelete="CASCADE"), nullable=False, index=True)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    sku: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    description: Mapped[str] = mapped_column(String(240), nullable=False)
+    quantity: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False)
+    unit_price: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    line_total: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    inventory_item_id: Mapped[str | None] = mapped_column(ForeignKey("inventory_items.id", ondelete="SET NULL"), nullable=True, index=True)
+    transaction: Mapped["POSTransaction"] = relationship(back_populates="lines")
 
 
 class Invoice(Base):
