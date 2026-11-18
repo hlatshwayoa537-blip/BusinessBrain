@@ -1635,3 +1635,5 @@ export default function App() {
     </main>
   </div>;
 }
+
+// Inventory stock ledger workspace is intentionally separate from POS transaction totals.
