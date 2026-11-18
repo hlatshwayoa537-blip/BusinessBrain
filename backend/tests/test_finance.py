@@ -112,3 +112,30 @@ def test_finance_summary_includes_pos_sales_and_refunds_without_double_counting(
     assert data["net_total"] == "130.00"
     assert data["pos_transaction_count"] == 2
     assert data["months"][10]["income"] == "150.00"
+
+
+def test_finance_pos_reporting_uses_south_african_business_calendar(client):
+    owner = register(client, "finance-pos-calendar@example.com", "POS Calendar Owner", "POS Calendar Co")
+    auth = headers(owner)
+    connection = client.post("/api/v1/pos/connections", headers=auth, json={
+        "provider_name": "Generic POS", "display_name": "Main till", "integration_method": "webhook"
+    }).json()
+    # 00:30 on 1 January in South Africa is still 31 December in UTC.
+    payload = {
+        "external_transaction_id": "FIN-POS-SA-YEAR-BOUNDARY",
+        "branch_name": "Bergville", "till_name": "Till 1",
+        "transaction_type": "sale", "occurred_at": "2026-01-01T00:30:00+02:00",
+        "currency": "ZAR", "gross_amount": "200.00", "discount_amount": "0.00",
+        "tax_amount": "26.09", "net_amount": "200.00", "payment_method": "card",
+    }
+    response = client.post(
+        f"/api/v1/pos/ingest/{connection['id']}",
+        headers={"X-Vexion-Secret": connection["webhook_secret"]}, json=payload,
+    )
+    assert response.status_code == 201
+    summary = client.get("/api/v1/finance/summary?year=2026", headers=auth)
+    assert summary.status_code == 200
+    data = summary.json()
+    assert data["pos_sales_total"] == "200.00"
+    assert data["pos_transaction_count"] == 1
+    assert data["months"][0]["income"] == "200.00"
