@@ -69,10 +69,15 @@ def test_purchase_order_goods_receipt_posts_only_linked_items_to_stock(client):
     assert submitted.status_code == 200
     received = client.post(f"/api/v1/procurement/purchase-orders/{order_id}/receive", headers=headers, json={
         "lines": [{"line_id": line_id, "quantity": "4"}],
-        "location": "Durban Branch", "note": "First delivery"
+        "location": "Durban Branch", "note": "First delivery", "idempotency_key": "inventory-receipt-first-0001"
     })
     assert received.status_code == 200
     assert received.json()["status"] == "partially_received"
+    retried = client.post(f"/api/v1/procurement/purchase-orders/{order_id}/receive", headers=headers, json={
+        "lines": [{"line_id": line_id, "quantity": "4"}],
+        "location": "Durban Branch", "note": "First delivery", "idempotency_key": "inventory-receipt-first-0001"
+    })
+    assert retried.status_code == 200
 
     stock = client.get("/api/v1/inventory/items", headers=headers)
     assert stock.json()[0]["stock_total"] == "4.000"
