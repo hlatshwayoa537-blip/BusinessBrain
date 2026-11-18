@@ -10,12 +10,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.routes.auth import get_current_user
-from app.api.routes.discrepancies import MEMBERS, add_event, membership_for, scoped_item
+from app.api.routes.discrepancies import add_event, membership_for, scoped_item
 from app.db import get_db
 from app.models import DiscrepancyEvidence, User
 from app.services.private_storage import (
     delete_object, object_head, presigned_download, presigned_upload,
-    promote_clean_object, scan_object_with_clamav,
+    promote_clean_object, scan_object_with_clamav, validate_object_content,
 )
 
 router = APIRouter(prefix="/discrepancies", tags=["discrepancy evidence"])
@@ -106,6 +106,7 @@ def complete_evidence_upload(
             pass
         raise HTTPException(status_code=422, detail="Uploaded file size or content type does not match the request.")
     try:
+        validate_object_content(evidence.storage_key, Path(evidence.original_filename).suffix.lower())
         scan_object_with_clamav(evidence.storage_key)
     except HTTPException as exc:
         if exc.status_code == 422:
@@ -119,6 +120,9 @@ def complete_evidence_upload(
         raise
     final_key = f"discrepancies/{membership.business_id}/{item.id}/{evidence.id}"
     promote_clean_object(evidence.storage_key, final_key)
+    promoted = object_head(final_key)
+    if int(promoted.get("ContentLength", 0)) != evidence.size_bytes or promoted.get("ContentType") != evidence.content_type:
+        raise HTTPException(status_code=503, detail="The scanned evidence could not be verified in private storage. It has not been made available.")
     evidence.storage_key = final_key
     evidence.status = "clean"
     evidence.scanned_at = datetime.now(timezone.utc)
