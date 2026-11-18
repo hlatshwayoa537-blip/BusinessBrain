@@ -385,7 +385,7 @@ def receive_purchase_order(order_id: str, payload: GoodsReceiptCreate, db: Sessi
         raise HTTPException(status_code=422, detail="Enter a stock location.")
     receipt_event = add_event(db, order, user, "goods_received", {
         "lines": received_details, "note": payload.note, "location": location,
-    })
+    }, idempotency_key=payload.idempotency_key)
     for receipt in payload.lines:
         line = by_id[receipt.line_id]
         if line.product_id:
