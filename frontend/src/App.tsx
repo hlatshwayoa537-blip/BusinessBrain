@@ -518,7 +518,7 @@ function InvoiceWorkspace({session}:{session:AuthData}) {
   const [dueDate,setDueDate]=useState(today);
   const [currency,setCurrency]=useState("ZAR");
   const [notes,setNotes]=useState("");
-  const [lines,setLines]=useState<InvoiceLineDraft[]>([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
+  const [lines,setLines]=useState<InvoiceLineDraft[]>([{description:"",product_id:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
   const [loading,setLoading]=useState(true);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
@@ -536,7 +536,7 @@ function InvoiceWorkspace({session}:{session:AuthData}) {
     event.preventDefault();setBusy(true);setError("");setMessage("");
     try{
       const created=await request("/invoices","POST",{customer_name:customer,customer_email:email||null,customer_phone:phone||null,customer_address:address||null,issue_date:issueDate,due_date:dueDate,currency,notes:notes||null,lines}) as InvoiceData;
-      setMessage("Invoice "+created.invoice_number+" created as a draft.");setCustomer("");setEmail("");setPhone("");setAddress("");setNotes("");setLines([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);await load();
+      setMessage("Invoice "+created.invoice_number+" created as a draft.");setCustomer("");setEmail("");setPhone("");setAddress("");setNotes("");setLines([{description:"",product_id:"",quantity:"1",unit_price:"",tax_rate:"15"}]);await load();
     }catch(e){setError(e instanceof Error?e.message:"Invoice could not be created.");}
     finally{setBusy(false);}
   }
@@ -556,7 +556,7 @@ function InvoiceWorkspace({session}:{session:AuthData}) {
         <label>Customer address<textarea rows={2} maxLength={2000} value={address} onChange={e=>setAddress(e.target.value)} placeholder="Billing address (optional)"/></label>
         <div className="finance-form-row"><label>Invoice date<input type="date" required value={issueDate} onChange={e=>setIssueDate(e.target.value)}/></label><label>Due date<input type="date" required min={issueDate} value={dueDate} onChange={e=>setDueDate(e.target.value)}/></label></div>
         <label>Currency<select value={currency} onChange={e=>setCurrency(e.target.value)}><option value="ZAR">South African rand (ZAR)</option><option value="USD">US dollar (USD)</option><option value="GBP">Pound sterling (GBP)</option><option value="EUR">Euro (EUR)</option></select></label>
-        <div className="invoice-lines-heading"><strong>Invoice items</strong><button type="button" className="network-secondary-button" onClick={()=>setLines(current=>[...current,{description:"",quantity:"1",unit_price:"",tax_rate:"15"}])}>Add item</button></div>
+        <div className="invoice-lines-heading"><strong>Invoice items</strong><button type="button" className="network-secondary-button" onClick={()=>setLines(current=>[...current,{description:"",product_id:"",quantity:"1",unit_price:"",tax_rate:"15"}])}>Add item</button></div>
         {lines.map((line,index)=><div className="invoice-line-editor" key={index}><label>Description<input required minLength={2} maxLength={240} value={line.description} onChange={e=>updateLine(index,{description:e.target.value})} placeholder="Product or service"/></label><div className="invoice-line-fields"><label>Qty<input required type="number" min="0.001" step="0.001" value={line.quantity} onChange={e=>updateLine(index,{quantity:e.target.value})}/></label><label>Unit price<input required type="number" min="0" step="0.01" value={line.unit_price} onChange={e=>updateLine(index,{unit_price:e.target.value})}/></label><label>VAT %<input required type="number" min="0" max="100" step="0.01" value={line.tax_rate} onChange={e=>updateLine(index,{tax_rate:e.target.value})}/></label><button type="button" className="network-secondary-button" disabled={lines.length===1} onClick={()=>setLines(current=>current.filter((_,i)=>i!==index))}>Remove</button></div></div>)}
         <label>Notes / payment terms<textarea rows={2} maxLength={3000} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Payment instructions or additional notes"/></label>
         <div className="invoice-preview-total"><span>Estimated total including VAT</span><strong>{currency} {preview.toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></div>
@@ -814,13 +814,87 @@ function ReferralWorkspace({session}:{session:AuthData}) {
 }
 
 
+
+type InventoryItemRecord = { id:string; sku?:string|null; name:string; unit:string; reorder_level:string; is_active:boolean; stock_total:string; stock_by_location:Record<string,string>; below_reorder_level:boolean };
+type InventoryMovementRecord = { id:string; item_name:string; movement_type:string; quantity_delta:string; location:string; source_type:string; note?:string|null; created_at:string };
+
+function InventoryWorkspace({session}:{session:AuthData}) {
+  const [items,setItems]=useState<InventoryItemRecord[]>([]);
+  const [movements,setMovements]=useState<InventoryMovementRecord[]>([]);
+  const [name,setName]=useState("");
+  const [sku,setSku]=useState("");
+  const [unit,setUnit]=useState("unit");
+  const [reorder,setReorder]=useState("0");
+  const [adjustments,setAdjustments]=useState<Record<string,{quantity:string;location:string;reason:string}>>({});
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const [message,setMessage]=useState("");
+  async function request(path:string,method="GET",body?:unknown) {
+    const response=await fetch(API_BASE+path,{method,headers:{Authorization:"Bearer "+session.access_token,...(body?{"Content-Type":"application/json"}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    const data=await response.json().catch(()=>null);
+    if(!response.ok)throw new Error(data?.detail||"Inventory request failed.");
+    return data;
+  }
+  async function refresh() {
+    try {
+      const [itemRows,movementRows]=await Promise.all([request("/inventory/items"),request("/inventory/movements?limit=100")]);
+      setItems(itemRows as InventoryItemRecord[]);setMovements(movementRows as InventoryMovementRecord[]);
+    } catch(err){setError(err instanceof Error?err.message:"Could not load stock records.");}
+  }
+  useEffect(()=>{void refresh();},[session.access_token]);
+  async function createItem(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();setBusy(true);setError("");setMessage("");
+    try {
+      await request("/inventory/items","POST",{name,sku:sku||null,unit,reorder_level:Number(reorder)});
+      setName("");setSku("");setUnit("unit");setReorder("0");setMessage("Inventory item created. No opening stock has been assumed.");await refresh();
+    } catch(err){setError(err instanceof Error?err.message:"Inventory item could not be created.");}
+    finally{setBusy(false);}
+  }
+  function setAdjustment(itemId:string,key:"quantity"|"location"|"reason",value:string) {
+    setAdjustments(current=>({...current,[itemId]:{quantity:"",location:"Main",reason:"",...current[itemId],[key]:value}}));
+  }
+  async function adjust(item:InventoryItemRecord) {
+    const draft=adjustments[item.id]||{quantity:"",location:"Main",reason:""};
+    if(!draft.quantity||Number(draft.quantity)===0||!draft.reason.trim()){setError("Enter a non-zero quantity and a reason for the stock movement.");return;}
+    setError("");setMessage("");
+    try {
+      await request("/inventory/items/"+item.id+"/adjustments","POST",{quantity_delta:Number(draft.quantity),location:draft.location||"Main",reason:draft.reason});
+      setAdjustments(current=>({...current,[item.id]:{quantity:"",location:draft.location||"Main",reason:""}}));
+      setMessage("Stock movement recorded for "+item.name+".");await refresh();
+    } catch(err){setError(err instanceof Error?err.message:"Stock movement could not be recorded.");}
+  }
+  const fmt=(value:string)=>Number(value).toLocaleString("en-ZA",{minimumFractionDigits:3,maximumFractionDigits:3});
+  return <section className="finance-centre" id="inventory-stock">
+    <div className="profile-centre-heading"><div><div className="eyebrow">INVENTORY & STOCK CONTROL</div><h2>Know what is actually on hand.</h2><p>Stock is calculated from recorded movements, not estimates or assumed opening balances.</p></div><span className="profile-status">Movement-ledger stock</span></div>
+    <p className="finance-alert">POS sales do not yet reduce stock automatically because the current POS feed stores transaction totals, not product-level SKUs and quantities. This module will only deduct stock when item-level POS data is integrated.</p>
+    {error&&<p className="finance-alert" role="alert">{error}</p>}{message&&<p className="finance-success" role="status">{message}</p>}
+    <form className="finance-form" onSubmit={createItem}>
+      <h3>Add inventory item</h3>
+      <div className="finance-toolbar"><label>Item name<input required minLength={2} value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. 2L cooking oil"/></label><label>SKU / barcode<input value={sku} onChange={e=>setSku(e.target.value)} placeholder="Optional unique code"/></label><label>Unit<input required value={unit} onChange={e=>setUnit(e.target.value)} placeholder="unit, kg, litre"/></label><label>Reorder level<input type="number" min="0" step="0.001" value={reorder} onChange={e=>setReorder(e.target.value)}/></label></div>
+      <button className="network-primary-button" disabled={busy||!name.trim()||!unit.trim()}>{busy?"Saving…":"Create inventory item"}</button>
+      <small>New items start with no stock movements. Record an opening balance only after physically verifying stock.</small>
+    </form>
+    <div className="finance-form">
+      <div className="profile-centre-heading"><div><h3>Stock on hand</h3><p>{items.length} catalogue item(s). Quantities below are calculated from the stock ledger.</p></div><button type="button" className="network-secondary-button" onClick={()=>void refresh()}>Refresh</button></div>
+      {items.length===0?<p className="network-empty">No inventory items have been created.</p>:items.map(item=><article className="purchase-order-card" key={item.id}>
+        <div className="profile-centre-heading"><div><strong>{item.name}</strong><p>{item.sku||"No SKU"} · {item.unit} · Reorder at {fmt(item.reorder_level)}</p></div><span className="quotation-status status-sent">{item.is_active?"Active":"Inactive"}</span></div>
+        <h3>{fmt(item.stock_total)} <small>{item.unit} recorded</small></h3>
+        {item.below_reorder_level&&<p className="finance-alert">At or below the configured reorder level. Check actual stock before ordering.</p>}
+        <div className="purchase-order-line"><span>Recorded by location</span><strong>{Object.keys(item.stock_by_location).length?Object.entries(item.stock_by_location).map(([location,qty])=>location+": "+fmt(qty)).join(" · "):"No stock movements recorded"}</strong></div>
+        {item.is_active&&<div className="purchase-line-draft"><h4>Record verified stock movement</h4><div className="finance-toolbar"><label>Quantity change (+ or −)<input type="number" step="0.001" value={adjustments[item.id]?.quantity||""} onChange={e=>setAdjustment(item.id,"quantity",e.target.value)} placeholder="+10 or -2"/></label><label>Location<input value={adjustments[item.id]?.location||"Main"} onChange={e=>setAdjustment(item.id,"location",e.target.value)} /></label><label>Reason<input value={adjustments[item.id]?.reason||""} onChange={e=>setAdjustment(item.id,"reason",e.target.value)} placeholder="Opening count / damaged goods"/></label></div><button type="button" className="network-secondary-button" onClick={()=>void adjust(item)}>Record stock movement</button></div>}
+      </article>)}
+    </div>
+    <div className="finance-form"><h3>Recent stock movement history</h3>{movements.length===0?<p className="network-empty">No stock movements have been recorded.</p>:movements.map(move=><article className="network-list-card" key={move.id}><strong>{move.item_name} · {move.quantity_delta}</strong><span>{move.movement_type.replaceAll("_"," ")} · {move.location} · {move.source_type}</span><small>{move.note||"No note"} · {new Date(move.created_at).toLocaleString("en-ZA")}</small></article>)}</div>
+  </section>;
+}
+
 type SupplierRecord = { id:string; name:string; contact_name?:string|null; email?:string|null; phone?:string|null; is_active:boolean };
-type PurchaseOrderLineRecord = { id:string; description:string; quantity_ordered:string; quantity_received:string; quantity_outstanding:string; unit_price:string; tax_rate:string; line_total:string };
+type PurchaseOrderLineRecord = { id:string; product_id?:string|null; description:string; quantity_ordered:string; quantity_received:string; quantity_outstanding:string; unit_price:string; tax_rate:string; line_total:string };
 type PurchaseOrderRecord = { id:string; reference:string; supplier_id:string; supplier_name:string; status:string; expected_delivery_date?:string|null; subtotal:string; tax_total:string; total:string; lines:PurchaseOrderLineRecord[]; events?:{event_type:string;created_at:string;details:Record<string,unknown>}[] };
-type PurchaseLineDraft = { description:string; quantity:string; unit_price:string; tax_rate:string };
+type PurchaseLineDraft = { description:string; product_id:string; quantity:string; unit_price:string; tax_rate:string };
 
 function SupplierPurchasingWorkspace({session}:{session:AuthData}) {
-  const [suppliers,setSuppliers]=useState<SupplierRecord[]>([]);
+  const [suppliers,setSuppliers]=useState<SupplierRecord[]>([]);\n  const [inventoryItems,setInventoryItems]=useState<InventoryItemRecord[]>([]);\n  const [receiptLocation,setReceiptLocation]=useState("Main");
   const [orders,setOrders]=useState<PurchaseOrderRecord[]>([]);
   const [supplierName,setSupplierName]=useState("");
   const [supplierContact,setSupplierContact]=useState("");
@@ -829,7 +903,7 @@ function SupplierPurchasingWorkspace({session}:{session:AuthData}) {
   const [selectedSupplier,setSelectedSupplier]=useState("");
   const [expectedDate,setExpectedDate]=useState("");
   const [orderNotes,setOrderNotes]=useState("");
-  const [lines,setLines]=useState<PurchaseLineDraft[]>([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
+  const [lines,setLines]=useState<PurchaseLineDraft[]>([{description:"",product_id:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
   const [receiveQuantities,setReceiveQuantities]=useState<Record<string,string>>({});
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
@@ -865,7 +939,7 @@ function SupplierPurchasingWorkspace({session}:{session:AuthData}) {
   async function createOrder(event:FormEvent<HTMLFormElement>) {
     event.preventDefault();setBusy(true);setError("");setMessage("");
     try {
-      const created=await request("/procurement/purchase-orders","POST",{supplier_id:selectedSupplier,expected_delivery_date:expectedDate||null,notes:orderNotes||null,lines:lines.map(line=>({...line,quantity:Number(line.quantity),unit_price:Number(line.unit_price),tax_rate:Number(line.tax_rate)}))}) as PurchaseOrderRecord;
+      const created=await request("/procurement/purchase-orders","POST",{supplier_id:selectedSupplier,expected_delivery_date:expectedDate||null,notes:orderNotes||null,lines:lines.map(line=>({...line,product_id:line.product_id||null,quantity:Number(line.quantity),unit_price:Number(line.unit_price),tax_rate:Number(line.tax_rate)}))}) as PurchaseOrderRecord;
       setMessage("Draft "+created.reference+" created. Review it before submitting to the supplier.");
       setExpectedDate("");setOrderNotes("");setLines([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);await refresh();
     } catch(err) {setError(err instanceof Error?err.message:"Purchase order could not be created.");}
@@ -881,7 +955,7 @@ function SupplierPurchasingWorkspace({session}:{session:AuthData}) {
     if(!quantity||Number(quantity)<=0){setError("Enter the quantity actually received.");return;}
     setError("");setMessage("");
     try {
-      await request("/procurement/purchase-orders/"+order.id+"/receive","POST",{lines:[{line_id:line.id,quantity:Number(quantity)}]});
+      await request("/procurement/purchase-orders/"+order.id+"/receive","POST",{lines:[{line_id:line.id,quantity:Number(quantity)}],location:receiptLocation});
       setReceiveQuantities(current=>({...current,[line.id]:""}));setMessage("Goods receipt recorded for "+order.reference+".");await refresh();
     } catch(err){setError(err instanceof Error?err.message:"Goods receipt could not be recorded.");}
   }
@@ -905,9 +979,9 @@ function SupplierPurchasingWorkspace({session}:{session:AuthData}) {
         <label>Supplier<select required value={selectedSupplier} onChange={e=>setSelectedSupplier(e.target.value)}><option value="">Choose supplier</option>{suppliers.filter(s=>s.is_active).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Expected delivery date<input type="date" value={expectedDate} onChange={e=>setExpectedDate(e.target.value)}/></label>
         <label>Notes<textarea value={orderNotes} onChange={e=>setOrderNotes(e.target.value)} rows={2} placeholder="Delivery instructions or internal notes"/></label>
-        <h4>Order lines</h4>
+        <label>Stock location for receipts<input value={receiptLocation} onChange={e=>setReceiptLocation(e.target.value)} placeholder="Main"/></label><h4>Order lines</h4>
         {lines.map((line,index)=><div className="purchase-line-draft" key={index}>
-          <label>Description<input required value={line.description} onChange={e=>updateLine(index,"description",e.target.value)} placeholder="Item or service"/></label>
+          <label>Link inventory item (optional)<select value={line.product_id} onChange={e=>updateLine(index,"product_id",e.target.value)}><option value="">Do not track stock for this line</option>{inventoryItems.map(item=><option key={item.id} value={item.id}>{item.name}{item.sku?" · "+item.sku:""}</option>)}</select></label><label>Description<input required value={line.description} onChange={e=>updateLine(index,"description",e.target.value)} placeholder="Item or service"/></label>
           <div className="finance-toolbar"><label>Qty<input type="number" min="0.001" step="0.001" required value={line.quantity} onChange={e=>updateLine(index,"quantity",e.target.value)}/></label><label>Unit price (R)<input type="number" min="0" step="0.01" required value={line.unit_price} onChange={e=>updateLine(index,"unit_price",e.target.value)}/></label><label>VAT %<input type="number" min="0" max="100" step="0.01" value={line.tax_rate} onChange={e=>updateLine(index,"tax_rate",e.target.value)}/></label></div>
           {lines.length>1&&<button type="button" className="network-secondary-button" onClick={()=>setLines(current=>current.filter((_,i)=>i!==index))}>Remove line</button>}
         </div>)}
@@ -920,7 +994,7 @@ function SupplierPurchasingWorkspace({session}:{session:AuthData}) {
       {orders.length===0?<p className="network-empty">No purchase orders recorded yet.</p>:orders.map(order=><article className="purchase-order-card" key={order.id}>
         <div className="profile-centre-heading"><div><strong>{order.reference}</strong><p>{order.supplier_name} · {order.expected_delivery_date||"No delivery date"}</p></div><span className="quotation-status status-sent">{order.status.replaceAll("_"," ")}</span></div>
         <p><strong>{money(order.total)}</strong> <small>incl. VAT · {order.lines.length} line(s)</small></p>
-        {order.lines.map(line=><div className="purchase-order-line" key={line.id}><span>{line.description}<small>Ordered {line.quantity_ordered} · Received {line.quantity_received} · Outstanding {line.quantity_outstanding}</small></span><strong>{money(line.line_total)}</strong>
+        {order.lines.map(line=><div className="purchase-order-line" key={line.id}><span>{line.description}<small>{line.product_id?"Stock-tracked item":"Not linked to stock"} · Ordered {line.quantity_ordered} · Received {line.quantity_received} · Outstanding {line.quantity_outstanding}</small></span><strong>{money(line.line_total)}</strong>
           {(order.status==="submitted"||order.status==="partially_received")&&Number(line.quantity_outstanding)>0&&<div className="finance-toolbar"><input aria-label={"Quantity received for "+line.description} type="number" min="0.001" max={line.quantity_outstanding} step="0.001" placeholder="Qty received" value={receiveQuantities[line.id]||""} onChange={e=>setReceiveQuantities(current=>({...current,[line.id]:e.target.value}))}/><button type="button" className="network-secondary-button" onClick={()=>void receiveLine(order,line)}>Record receipt</button></div>}
         </div>)}
         {order.status==="draft"&&<button type="button" className="network-primary-button" onClick={()=>void orderAction(order,"submit")}>Submit purchase order</button>}
@@ -1385,7 +1459,7 @@ export default function App() {
       <ReferralWorkspace session={session} />
       <SalesIntelligenceWorkspace session={session} />
       <InvoiceWorkspace session={session} />
-      <SupplierPurchasingWorkspace session={session} />
+      <InventoryWorkspace session={session} />\n      <SupplierPurchasingWorkspace session={session} />
       <FinanceWorkspace session={session} />
       <section className="profile-centre" id="business-profile">
         <div className="profile-centre-heading"><div><div className="eyebrow">BUSINESS IDENTITY</div><h2>Business Profile & Onboarding</h2><p>Complete your business details. You control what information is shared publicly later.</p></div><span className="profile-status">Editable anytime</span></div>
