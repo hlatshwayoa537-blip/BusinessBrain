@@ -457,6 +457,7 @@ class PurchaseOrderLine(Base):
     quantity_received: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False, default=0)
     unit_price: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
     tax_rate: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0)
+    product_id: Mapped[str | None] = mapped_column(ForeignKey("inventory_items.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 class PurchaseOrderEvent(Base):
