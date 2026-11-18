@@ -133,7 +133,7 @@ def test_daily_close_reconciliation_detects_late_pos_transactions_without_mutati
     assert initial.json()["pos_totals"]["cash"] == "100.00"
     assert initial.json()["variance_vs_pos"]["cash"] == "-5.00"
 
-    late_sale = {**base, "external_transaction_id": "RECON-002", "net_amount": "20.00", "gross_amount": "20.00"}
+    late_sale = {**base, "external_transaction_id": "RECON-002", "transaction_type": "sale", "net_amount": "20.00", "gross_amount": "20.00"}
     accepted = client.post(
         f"/api/v1/pos/ingest/{connection['id']}",
         headers={"X-Vexion-Secret": secret}, json=late_sale
