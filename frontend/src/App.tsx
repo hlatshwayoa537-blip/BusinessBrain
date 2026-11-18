@@ -19,7 +19,7 @@ const modules = [
   { icon: ChartNoAxesCombined, title: "Financial Intelligence", detail: "Understand your business finances", tag: "Available" },
   { icon: FileText, title: "Invoices & Quotes", detail: "Create and manage business documents", tag: "Planned" },
   { icon: Users, title: "Customers & CRM", detail: "Build stronger customer relationships", tag: "Planned" },
-  { icon: Package, title: "Inventory & Procurement", detail: "Keep stock and suppliers in view", tag: "Planned" },
+  { icon: Package, title: "Suppliers & Purchasing", detail: "Manage suppliers, purchase orders and goods received", tag: "Available" },
   { icon: BriefcaseBusiness, title: "People & Recruitment", detail: "Manage your team and hiring pipeline", tag: "Planned" },
   { icon: Bot, title: "AI Business Manager", detail: "Ask questions grounded in your records", tag: "Planned" },
 ];
@@ -813,6 +813,124 @@ function ReferralWorkspace({session}:{session:AuthData}) {
   </section>;
 }
 
+
+type SupplierRecord = { id:string; name:string; contact_name?:string|null; email?:string|null; phone?:string|null; is_active:boolean };
+type PurchaseOrderLineRecord = { id:string; description:string; quantity_ordered:string; quantity_received:string; quantity_outstanding:string; unit_price:string; tax_rate:string; line_total:string };
+type PurchaseOrderRecord = { id:string; reference:string; supplier_id:string; supplier_name:string; status:string; expected_delivery_date?:string|null; subtotal:string; tax_total:string; total:string; lines:PurchaseOrderLineRecord[]; events?:{event_type:string;created_at:string;details:Record<string,unknown>}[] };
+type PurchaseLineDraft = { description:string; quantity:string; unit_price:string; tax_rate:string };
+
+function SupplierPurchasingWorkspace({session}:{session:AuthData}) {
+  const [suppliers,setSuppliers]=useState<SupplierRecord[]>([]);
+  const [orders,setOrders]=useState<PurchaseOrderRecord[]>([]);
+  const [supplierName,setSupplierName]=useState("");
+  const [supplierContact,setSupplierContact]=useState("");
+  const [supplierEmail,setSupplierEmail]=useState("");
+  const [supplierPhone,setSupplierPhone]=useState("");
+  const [selectedSupplier,setSelectedSupplier]=useState("");
+  const [expectedDate,setExpectedDate]=useState("");
+  const [orderNotes,setOrderNotes]=useState("");
+  const [lines,setLines]=useState<PurchaseLineDraft[]>([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
+  const [receiveQuantities,setReceiveQuantities]=useState<Record<string,string>>({});
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const [message,setMessage]=useState("");
+
+  async function request(path:string,method="GET",body?:unknown) {
+    const response=await fetch(API_BASE+path,{method,headers:{Authorization:"Bearer "+session.access_token,...(body?{"Content-Type":"application/json"}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    const data=response.status===204?null:await response.json();
+    if(!response.ok) throw new Error(data?.detail||"The procurement request failed.");
+    return data;
+  }
+  async function refresh() {
+    try {
+      const [supplierRows,orderRows]=await Promise.all([request("/procurement/suppliers"),request("/procurement/purchase-orders")]);
+      setSuppliers(supplierRows as SupplierRecord[]);
+      setOrders(orderRows as PurchaseOrderRecord[]);
+    } catch(err) { setError(err instanceof Error?err.message:"Could not load supplier and purchasing records."); }
+  }
+  useEffect(()=>{void refresh();},[session.access_token]);
+
+  async function createSupplier(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();setBusy(true);setError("");setMessage("");
+    try {
+      const created=await request("/procurement/suppliers","POST",{name:supplierName,contact_name:supplierContact||null,email:supplierEmail||null,phone:supplierPhone||null}) as SupplierRecord;
+      setSupplierName("");setSupplierContact("");setSupplierEmail("");setSupplierPhone("");setSelectedSupplier(created.id);
+      setMessage("Supplier saved to this business workspace.");await refresh();
+    } catch(err) {setError(err instanceof Error?err.message:"Supplier could not be saved.");}
+    finally {setBusy(false);}
+  }
+  function updateLine(index:number,key:keyof PurchaseLineDraft,value:string) {
+    setLines(current=>current.map((line,i)=>i===index?{...line,[key]:value}:line));
+  }
+  async function createOrder(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();setBusy(true);setError("");setMessage("");
+    try {
+      const created=await request("/procurement/purchase-orders","POST",{supplier_id:selectedSupplier,expected_delivery_date:expectedDate||null,notes:orderNotes||null,lines:lines.map(line=>({...line,quantity:Number(line.quantity),unit_price:Number(line.unit_price),tax_rate:Number(line.tax_rate)}))}) as PurchaseOrderRecord;
+      setMessage("Draft "+created.reference+" created. Review it before submitting to the supplier.");
+      setExpectedDate("");setOrderNotes("");setLines([{description:"",quantity:"1",unit_price:"",tax_rate:"15"}]);await refresh();
+    } catch(err) {setError(err instanceof Error?err.message:"Purchase order could not be created.");}
+    finally {setBusy(false);}
+  }
+  async function orderAction(order:PurchaseOrderRecord,action:"submit"|"cancel") {
+    setError("");setMessage("");
+    try {await request("/procurement/purchase-orders/"+order.id+"/"+action,"POST");setMessage(order.reference+" "+(action==="submit"?"submitted.":"cancelled."));await refresh();}
+    catch(err){setError(err instanceof Error?err.message:"Purchase order action failed.");}
+  }
+  async function receiveLine(order:PurchaseOrderRecord,line:PurchaseOrderLineRecord) {
+    const quantity=receiveQuantities[line.id]||"";
+    if(!quantity||Number(quantity)<=0){setError("Enter the quantity actually received.");return;}
+    setError("");setMessage("");
+    try {
+      await request("/procurement/purchase-orders/"+order.id+"/receive","POST",{lines:[{line_id:line.id,quantity:Number(quantity)}]});
+      setReceiveQuantities(current=>({...current,[line.id]:""}));setMessage("Goods receipt recorded for "+order.reference+".");await refresh();
+    } catch(err){setError(err instanceof Error?err.message:"Goods receipt could not be recorded.");}
+  }
+  const money=(value:string)=>"R "+Number(value).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});
+  return <section className="finance-centre" id="supplier-purchasing">
+    <div className="profile-centre-heading"><div><div className="eyebrow">SUPPLIERS & PURCHASING</div><h2>Control what your business orders.</h2><p>Maintain supplier records, prepare purchase orders and record quantities actually received.</p></div><span className="profile-status">Business-scoped records</span></div>
+    <p className="finance-alert">Purchase orders are commitments, not paid expenses. Creating or receiving an order does not change income, expenses, stock or cash balances.</p>
+    {error&&<p className="finance-alert" role="alert">{error}</p>}{message&&<p className="finance-success" role="status">{message}</p>}
+    <div className="finance-layout">
+      <form className="finance-form" onSubmit={createSupplier}>
+        <h3>Add supplier</h3>
+        <label>Supplier name<input required minLength={2} maxLength={180} value={supplierName} onChange={e=>setSupplierName(e.target.value)} placeholder="Supplier or company name"/></label>
+        <label>Contact person<input value={supplierContact} onChange={e=>setSupplierContact(e.target.value)} placeholder="Contact name"/></label>
+        <label>Email<input type="email" value={supplierEmail} onChange={e=>setSupplierEmail(e.target.value)} placeholder="accounts@supplier.co.za"/></label>
+        <label>Phone<input value={supplierPhone} onChange={e=>setSupplierPhone(e.target.value)} placeholder="Supplier phone"/></label>
+        <button className="network-primary-button" disabled={busy||!supplierName.trim()}>{busy?"Saving…":"Save supplier"}</button>
+        <div className="network-list"><h3>Supplier directory · {suppliers.length}</h3>{suppliers.length===0?<p className="network-empty">No suppliers recorded yet.</p>:suppliers.map(s=><article className="network-list-card" key={s.id}><strong>{s.name}</strong><span>{s.contact_name||s.email||s.phone||"No contact details"}</span><small>{s.is_active?"Active":"Inactive"}</small></article>)}</div>
+      </form>
+      <form className="finance-form" onSubmit={createOrder}>
+        <h3>Create purchase order</h3>
+        <label>Supplier<select required value={selectedSupplier} onChange={e=>setSelectedSupplier(e.target.value)}><option value="">Choose supplier</option>{suppliers.filter(s=>s.is_active).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+        <label>Expected delivery date<input type="date" value={expectedDate} onChange={e=>setExpectedDate(e.target.value)}/></label>
+        <label>Notes<textarea value={orderNotes} onChange={e=>setOrderNotes(e.target.value)} rows={2} placeholder="Delivery instructions or internal notes"/></label>
+        <h4>Order lines</h4>
+        {lines.map((line,index)=><div className="purchase-line-draft" key={index}>
+          <label>Description<input required value={line.description} onChange={e=>updateLine(index,"description",e.target.value)} placeholder="Item or service"/></label>
+          <div className="finance-toolbar"><label>Qty<input type="number" min="0.001" step="0.001" required value={line.quantity} onChange={e=>updateLine(index,"quantity",e.target.value)}/></label><label>Unit price (R)<input type="number" min="0" step="0.01" required value={line.unit_price} onChange={e=>updateLine(index,"unit_price",e.target.value)}/></label><label>VAT %<input type="number" min="0" max="100" step="0.01" value={line.tax_rate} onChange={e=>updateLine(index,"tax_rate",e.target.value)}/></label></div>
+          {lines.length>1&&<button type="button" className="network-secondary-button" onClick={()=>setLines(current=>current.filter((_,i)=>i!==index))}>Remove line</button>}
+        </div>)}
+        <button type="button" className="network-secondary-button" onClick={()=>setLines(current=>[...current,{description:"",quantity:"1",unit_price:"",tax_rate:"15"}])}>Add another line</button>
+        <button className="network-primary-button" disabled={busy||!selectedSupplier||lines.some(line=>!line.description.trim()||!line.unit_price)}>{busy?"Saving…":"Save draft purchase order"}</button>
+      </form>
+    </div>
+    <div className="finance-form">
+      <div className="profile-centre-heading"><div><h3>Purchase orders</h3><p>{orders.length} recorded order(s). Submit drafts only after checking quantities and prices.</p></div><button type="button" className="network-secondary-button" onClick={()=>void refresh()}>Refresh</button></div>
+      {orders.length===0?<p className="network-empty">No purchase orders recorded yet.</p>:orders.map(order=><article className="purchase-order-card" key={order.id}>
+        <div className="profile-centre-heading"><div><strong>{order.reference}</strong><p>{order.supplier_name} · {order.expected_delivery_date||"No delivery date"}</p></div><span className="quotation-status status-sent">{order.status.replaceAll("_"," ")}</span></div>
+        <p><strong>{money(order.total)}</strong> <small>incl. VAT · {order.lines.length} line(s)</small></p>
+        {order.lines.map(line=><div className="purchase-order-line" key={line.id}><span>{line.description}<small>Ordered {line.quantity_ordered} · Received {line.quantity_received} · Outstanding {line.quantity_outstanding}</small></span><strong>{money(line.line_total)}</strong>
+          {(order.status==="submitted"||order.status==="partially_received")&&Number(line.quantity_outstanding)>0&&<div className="finance-toolbar"><input aria-label={"Quantity received for "+line.description} type="number" min="0.001" max={line.quantity_outstanding} step="0.001" placeholder="Qty received" value={receiveQuantities[line.id]||""} onChange={e=>setReceiveQuantities(current=>({...current,[line.id]:e.target.value}))}/><button type="button" className="network-secondary-button" onClick={()=>void receiveLine(order,line)}>Record receipt</button></div>}
+        </div>)}
+        {order.status==="draft"&&<button type="button" className="network-primary-button" onClick={()=>void orderAction(order,"submit")}>Submit purchase order</button>}
+        {(order.status==="draft"||order.status==="submitted")&&<button type="button" className="network-secondary-button" onClick={()=>void orderAction(order,"cancel")}>Cancel order</button>}
+        {order.events&&<details><summary>Order audit history</summary>{order.events.map((event,index)=><p key={index}><small>{new Date(event.created_at).toLocaleString("en-ZA")} · {event.event_type.replaceAll("_"," ")}</small></p>)}</details>}
+      </article>)}
+    </div>
+  </section>;
+}
+
 export default function App() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
   const [session, setSession] = useState<AuthData | null>(readSession);
@@ -1267,6 +1385,7 @@ export default function App() {
       <ReferralWorkspace session={session} />
       <SalesIntelligenceWorkspace session={session} />
       <InvoiceWorkspace session={session} />
+      <SupplierPurchasingWorkspace session={session} />
       <FinanceWorkspace session={session} />
       <section className="profile-centre" id="business-profile">
         <div className="profile-centre-heading"><div><div className="eyebrow">BUSINESS IDENTITY</div><h2>Business Profile & Onboarding</h2><p>Complete your business details. You control what information is shared publicly later.</p></div><span className="profile-status">Editable anytime</span></div>
@@ -1434,7 +1553,7 @@ export default function App() {
         </div>
       </section>
       <section className="stats-grid" aria-label="Workspace summary"><div className="stat-card"><span className="stat-icon">{session.business.profile_image_data_url ? <img src={session.business.profile_image_data_url} alt="Business profile"/> : <Building2 size={18}/>}</span><span className="stat-label">Business profile</span><strong>Created</strong><small>{session.business.country} · {session.business.industry}</small></div><div className="stat-card"><span className="stat-icon"><Users size={18}/></span><span className="stat-label">Your role</span><strong>Owner</strong><small>Workspace administrator</small></div><div className="stat-card"><span className="stat-icon"><CreditCard size={18}/></span><span className="stat-label">Financial overview</span><strong>Not connected</strong><small>Add records as you get started</small></div><div className="stat-card"><span className="stat-icon"><Activity size={18}/></span><span className="stat-label">System status</span><strong>{apiStatus === "online" ? "Connected" : "Offline"}</strong><small>Backend health check</small></div></section>
-      <section className="modules-section"><div className="section-heading"><div><div className="eyebrow">THE BUSINESS OPERATING SYSTEM</div><h2>Your business, connected.</h2><p>One workspace for the work that moves your business forward.</p></div><span className="module-count">06 CORE MODULES</span></div><div className="module-grid">{modules.map(({icon: Icon,title,detail,tag}) => <article className="module-card" key={title}><div className="module-icon"><Icon size={20}/></div><span className="module-tag">{tag}</span><h3>{title}</h3><p>{detail}</p><span className="module-footer">Part of VEXION <ArrowUpRight size={14}/></span></article>)}</div></section>
+      <section className="modules-section"><div className="section-heading"><div><div className="eyebrow">THE BUSINESS OPERATING SYSTEM</div><h2>Your business, connected.</h2><p>One workspace for the work that moves your business forward.</p></div><span className="module-count">07 CORE MODULES</span></div><div className="module-grid">{modules.map(({icon: Icon,title,detail,tag}) => <article className="module-card" key={title}><div className="module-icon"><Icon size={20}/></div><span className="module-tag">{tag}</span><h3>{title}</h3><p>{detail}</p><span className="module-footer">Part of VEXION <ArrowUpRight size={14}/></span></article>)}</div></section>
       <footer className="footer"><span>VEXION © 2026</span><span>BUILD THE INTELLIGENCE THAT RUNS BUSINESSES.</span></footer>
     </main>
   </div>;
