@@ -72,7 +72,7 @@ class POSTransactionResponse(BaseModel):
     tax_amount: Decimal
     net_amount: Decimal
     payment_method: str | None = None
-    items: list[POSIngestLineResponse] = Field(default_factory=list)
+    items: list[POSIngestLineResponse] = Field(default_factory=list, validation_alias="lines")
 
 class POSSalesSummary(BaseModel):
     currency: str = "ZAR"
