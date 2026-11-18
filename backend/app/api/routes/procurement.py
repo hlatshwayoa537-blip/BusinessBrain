@@ -184,6 +184,8 @@ def create_supplier(payload: SupplierCreate, db: Session = Depends(get_db), user
     membership = membership_for(user, db)
     require_manager(membership)
     name = payload.name.strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=422, detail="Supplier name must contain at least two non-space characters.")
     duplicate = db.scalar(select(Supplier.id).where(
         Supplier.business_id == membership.business_id, func.lower(Supplier.name) == name.lower(),
     ))
@@ -208,6 +210,8 @@ def update_supplier(supplier_id: str, payload: SupplierUpdate, db: Session = Dep
     changes = payload.model_dump(exclude_unset=True)
     if "name" in changes and changes["name"] is not None:
         changes["name"] = changes["name"].strip()
+        if len(changes["name"]) < 2:
+            raise HTTPException(status_code=422, detail="Supplier name must contain at least two non-space characters.")
         duplicate = db.scalar(select(Supplier.id).where(
             Supplier.business_id == membership.business_id,
             func.lower(Supplier.name) == changes["name"].lower(), Supplier.id != item.id,
@@ -285,8 +289,8 @@ def update_purchase_order(order_id: str, payload: PurchaseOrderUpdate, db: Sessi
         for line in changes["lines"]:
             db.add(PurchaseOrderLine(
                 id=str(uuid.uuid4()), purchase_order_id=order.id, business_id=membership.business_id,
-                description=line.description.strip(), quantity_ordered=line.quantity,
-                quantity_received=Decimal("0"), unit_price=line.unit_price, tax_rate=line.tax_rate,
+                description=line["description"].strip(), quantity_ordered=line["quantity"],
+                quantity_received=Decimal("0"), unit_price=line["unit_price"], tax_rate=line["tax_rate"],
             ))
     order.updated_at = datetime.now(timezone.utc)
     add_event(db, order, user, "updated", {"fields": sorted(changes.keys())})
