@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { Activity, ArrowUpRight, Bot, BriefcaseBusiness, Building2, ChartNoAxesCombined, ChevronRight, CircleHelp, CreditCard, FileText, LayoutDashboard, LockKeyhole, LogOut, Package, Settings2, ShieldCheck, Users } from "lucide-react";
+import { Activity, AlertTriangle, ArrowUpRight, Bot, BriefcaseBusiness, Building2, ChartNoAxesCombined, ChevronRight, CircleHelp, CreditCard, FileText, LayoutDashboard, LockKeyhole, LogOut, Package, Settings2, ShieldCheck, Users } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
 type ApiStatus = "checking" | "online" | "offline";
@@ -497,6 +497,92 @@ function InvoiceWorkspace({session}:{session:AuthData}) {
 }
 
 
+
+type DiscrepancyRow = {id:string;daily_close_id:string|null;title:string;description:string;category:string;priority:string;status:string;amount:string|null;currency:string;assigned_to_user_id:string|null;resolution_note:string|null;created_at:string;updated_at:string};
+type DiscrepancyDetail = DiscrepancyRow & {events:{id:string;actor_user_id:string;event_type:string;details:Record<string,string>;created_at:string}[]};
+function DiscrepancyWorkspace({session}:{session:AuthData}) {
+  const [items,setItems]=useState<DiscrepancyRow[]>([]);
+  const [staff,setStaff]=useState<{user_id:string;full_name:string;role:string}[]>([]);
+  const [closes,setCloses]=useState<DailyCloseRow[]>([]);
+  const [selected,setSelected]=useState<DiscrepancyDetail|null>(null);
+  const [title,setTitle]=useState("");
+  const [description,setDescription]=useState("");
+  const [category,setCategory]=useState("reconciliation");
+  const [priority,setPriority]=useState("normal");
+  const [amount,setAmount]=useState("");
+  const [closeId,setCloseId]=useState("");
+  const [assignee,setAssignee]=useState("");
+  const [note,setNote]=useState("");
+  const [filter,setFilter]=useState("all");
+  const [loading,setLoading]=useState(true);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const [message,setMessage]=useState("");
+  async function request(path:string,method="GET",body?:unknown) {
+    const response=await fetch(API_BASE+path,{method,headers:{Authorization:"Bearer "+session.access_token,...(body?{"Content-Type":"application/json"}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    const data=await response.json();
+    if(!response.ok)throw new Error(data.detail||"Discrepancy request failed.");
+    return data;
+  }
+  async function load() {
+    setLoading(true);setError("");
+    try {
+      const [rows,members,days]=await Promise.all([request("/discrepancies"+(filter==="all"?"":"?status="+filter)),request("/staff"),request("/daily-closes")]);
+      setItems(rows as DiscrepancyRow[]);setStaff(members as typeof staff);setCloses(days as DailyCloseRow[]);
+      if(selected){const fresh=await request("/discrepancies/"+selected.id) as DiscrepancyDetail;setSelected(fresh);}
+    } catch(e){setError(e instanceof Error?e.message:"Could not load discrepancy records.");}
+    finally{setLoading(false);}
+  }
+  useEffect(()=>{void load();},[session.access_token,filter]);
+  async function create(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();setBusy(true);setError("");setMessage("");
+    try {
+      const item=await request("/discrepancies","POST",{title,description,category,priority,amount:amount||null,currency:"ZAR",daily_close_id:closeId||null,assigned_to_user_id:assignee||null}) as DiscrepancyRow;
+      setTitle("");setDescription("");setAmount("");setCloseId("");setAssignee("");setMessage("Discrepancy case opened and added to the investigation register.");
+      await load();setSelected(await request("/discrepancies/"+item.id) as DiscrepancyDetail);
+    } catch(e){setError(e instanceof Error?e.message:"Could not create discrepancy.");}
+    finally{setBusy(false);}
+  }
+  async function openItem(item:DiscrepancyRow){try{setSelected(await request("/discrepancies/"+item.id) as DiscrepancyDetail);}catch(e){setError(e instanceof Error?e.message:"Could not open discrepancy.");}}
+  async function update(item:DiscrepancyDetail,patch:Record<string,unknown>){setBusy(true);setError("");setMessage("");try{await request("/discrepancies/"+item.id,"PATCH",patch);setMessage("Discrepancy updated.");await load();setSelected(await request("/discrepancies/"+item.id) as DiscrepancyDetail);}catch(e){setError(e instanceof Error?e.message:"Could not update discrepancy.");}finally{setBusy(false);}}
+  async function addNote(event:FormEvent<HTMLFormElement>){event.preventDefault();if(!selected||!note.trim())return;setBusy(true);setError("");try{await request("/discrepancies/"+selected.id+"/notes","POST",{note});setNote("");setSelected(await request("/discrepancies/"+selected.id) as DiscrepancyDetail);setMessage("Investigation note added to the audit timeline.");}catch(e){setError(e instanceof Error?e.message:"Could not add investigation note.");}finally{setBusy(false);}}
+  const money=(value:string|null)=>value===null?"Amount not recorded": "R "+Number(value).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});
+  return <section className="finance-centre" id="discrepancies">
+    <div className="profile-centre-heading"><div><div className="eyebrow">VEXION CONTROL & RESOLUTION</div><h2>Discrepancy management.</h2><p>Turn differences into assigned, documented investigations. A discrepancy is a review item, not proof of wrongdoing.</p></div><span className="profile-status"><AlertTriangle size={14}/> Case register</span></div>
+    {error&&<p className="finance-alert" role="alert">{error}</p>}{message&&<p className="finance-success" role="status">{message}</p>}
+    <div className="finance-stats">
+      <article><span>Open</span><strong>{items.filter(x=>x.status==="open").length}</strong><small>Awaiting investigation</small></article>
+      <article><span>Investigating</span><strong>{items.filter(x=>x.status==="investigating").length}</strong><small>Assigned / in progress</small></article>
+      <article><span>Resolved</span><strong>{items.filter(x=>x.status==="resolved").length}</strong><small>Resolution documented</small></article>
+      <article><span>Urgent</span><strong>{items.filter(x=>x.priority==="urgent"&&x.status!=="resolved").length}</strong><small>Requires priority attention</small></article>
+    </div>
+    <div className="pos-layout">
+      <form className="finance-form" onSubmit={create}>
+        <div className="recruitment-card-heading"><div><span className="eyebrow">NEW CASE</span><h3>Record a discrepancy</h3></div></div>
+        <label>Case title<input required minLength={3} maxLength={180} value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. Cash count differs from POS"/></label>
+        <label>What needs investigation?<textarea required minLength={5} maxLength={4000} rows={4} value={description} onChange={e=>setDescription(e.target.value)} placeholder="Record what was observed, where it occurred and what needs checking."/></label>
+        <div className="finance-form-row"><label>Category<select value={category} onChange={e=>setCategory(e.target.value)}><option value="reconciliation">Reconciliation</option><option value="pos_data">POS data</option><option value="cash">Cash</option><option value="card">Card settlement</option><option value="expense">Expense</option><option value="other">Other</option></select></label><label>Priority<select value={priority} onChange={e=>setPriority(e.target.value)}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></label></div>
+        <div className="finance-form-row"><label>Amount (optional)<input type="number" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="Only enter a verified amount"/></label><label>Link daily close (optional)<select value={closeId} onChange={e=>setCloseId(e.target.value)}><option value="">No linked daily close</option>{closes.map(c=><option key={c.id} value={c.id}>{c.business_date} · {c.branch_name}</option>)}</select></label></div>
+        <label>Assign to team member (optional)<select value={assignee} onChange={e=>setAssignee(e.target.value)}><option value="">Unassigned</option>{staff.map(member=><option key={member.user_id} value={member.user_id}>{member.full_name} · {member.role}</option>)}</select></label>
+        <button className="auth-submit" type="submit" disabled={busy}>{busy?"Opening case…":"Open discrepancy case"} <ArrowUpRight size={16}/></button>
+        <p className="finance-disclaimer">Amounts are optional and must come from verified records. Linking a daily close does not change that close or create a financial adjustment.</p>
+      </form>
+      <div className="finance-report">
+        <div className="recruitment-card-heading"><div><span className="eyebrow">INVESTIGATION QUEUE</span><h3>Discrepancy register</h3></div><select aria-label="Filter discrepancy status" value={filter} onChange={e=>setFilter(e.target.value)}><option value="all">All cases</option><option value="open">Open</option><option value="investigating">Investigating</option><option value="resolved">Resolved</option></select></div>
+        {loading?<p className="network-empty">Loading discrepancy records…</p>:items.length===0?<p className="network-empty">No discrepancy cases recorded. Differences are not automatically labelled as wrongdoing; create a case when a real item needs investigation.</p>:<div className="finance-record-list">{items.map(item=><button type="button" className="finance-record-row" key={item.id} onClick={()=>void openItem(item)}><span><strong>{item.title}</strong><small>{item.category.replaceAll("_"," ")} · {item.priority} · {new Date(item.created_at).toLocaleDateString("en-ZA")}</small></span><span><strong>{item.status.replaceAll("_"," ")}</strong><small>{money(item.amount)}</small></span></button>)}</div>}
+      </div>
+    </div>
+    {selected&&<div className="finance-form daily-close-detail">
+      <div className="recruitment-card-heading"><div><span className="eyebrow">CASE FILE</span><h3>{selected.title}</h3></div><span className="profile-status">{selected.status}</span></div>
+      <p>{selected.description}</p><div className="profile-fields-grid"><p>Priority: <strong>{selected.priority}</strong></p><p>Category: <strong>{selected.category.replaceAll("_"," ")}</strong></p><p>Amount: <strong>{money(selected.amount)}</strong></p><p>Linked close: <strong>{selected.daily_close_id?"Yes":"No"}</strong></p></div>
+      <div className="finance-form-row"><label>Assigned team member<select value={selected.assigned_to_user_id||""} onChange={e=>void update(selected,{assigned_to_user_id:e.target.value||null})}><option value="">Unassigned</option>{staff.map(member=><option key={member.user_id} value={member.user_id}>{member.full_name}</option>)}</select></label><label>Case status<select value={selected.status} onChange={e=>{const next=e.target.value;if(next==="resolved"){const resolution=window.prompt("Enter the resolution note before closing this case:");if(resolution&&resolution.trim().length>=3)void update(selected,{status:next,resolution_note:resolution});}else void update(selected,{status:next});}}><option value="open">Open</option><option value="investigating">Investigating</option><option value="resolved">Resolved</option></select></label></div>
+      {selected.resolution_note&&<p className="finance-success">Resolution: {selected.resolution_note}</p>}
+      <form className="message-compose" onSubmit={addNote}><input required minLength={2} maxLength={4000} value={note} onChange={e=>setNote(e.target.value)} placeholder="Add an investigation note…"/><button type="submit" disabled={busy}>Add note</button></form>
+      <div className="discrepancy-timeline"><strong>Audit timeline</strong>{selected.events.map(event=><article key={event.id}><span>{event.event_type.replaceAll("_"," ")}</span><small>{new Date(event.created_at).toLocaleString("en-ZA")}</small>{event.details.note&&<p>{event.details.note}</p>}{event.details.to&&<p>Status: {event.details.from} → {event.details.to}</p>}</article>)}</div>
+    </div>}
+    <p className="finance-disclaimer">Every case change and investigation note is recorded with the acting user and timestamp. Evidence file uploads are not enabled in this release; notes are retained in the audit timeline.</p>
+  </section>;
+}
 
 type BillingOverview = {
   currency: string;
@@ -1086,7 +1172,7 @@ export default function App() {
       <a className="brand" href="/" aria-label="VEXION home"><div className="brand-mark"><Activity size={22}/></div><span>VEXION</span></a>
       <div className="workspace-label">WORKSPACE</div>
       <div className="workspace-switch"><span className="workspace-icon">{session.business.profile_image_data_url ? <img src={session.business.profile_image_data_url} alt="Business profile"/> : <Building2 size={17}/>}</span><span><strong>{session.business.name}</strong><small>{session.business.industry}</small></span><ChevronRight size={16}/></div>
-      <nav className="navigation" aria-label="Main navigation"><a className="nav-item active" href="#overview"><LayoutDashboard size={18}/>Overview</a><a className="nav-item" href="#pos-connections"><Activity size={18}/>POS Connections</a><a className="nav-item" href="#sales-intelligence"><ChartNoAxesCombined size={18}/>Sales Intelligence</a><a className="nav-item" href="#invoices"><FileText size={18}/>Invoices</a><a className="nav-item" href="#finance"><CreditCard size={18}/>Expenses & Profit</a><a className="nav-item" href="#billing"><CreditCard size={18}/>Billing & POS Pricing</a><a className="nav-item" href="#referrals"><Users size={18}/>Refer & Earn</a><a className="nav-item" href="#customers"><Users size={18}/>Customers</a><a className="nav-item" href="#operations"><Package size={18}/>Operations</a><a className="nav-item" href="#team"><Users size={18}/>Team Management</a><a className="nav-item" href="#people"><BriefcaseBusiness size={18}/>People & HR</a><a className="nav-item" href="#business-profile"><Building2 size={18}/>Business Profile</a><a className="nav-item" href="#network"><Building2 size={18}/>Business Network</a><a className="nav-item" href="#private-conversations"><LockKeyhole size={18}/>Private Conversations</a></nav>
+      <nav className="navigation" aria-label="Main navigation"><a className="nav-item active" href="#overview"><LayoutDashboard size={18}/>Overview</a><a className="nav-item" href="#pos-connections"><Activity size={18}/>POS Connections</a><a className="nav-item" href="#discrepancies"><AlertTriangle size={18}/>Discrepancies</a><a className="nav-item" href="#sales-intelligence"><ChartNoAxesCombined size={18}/>Sales Intelligence</a><a className="nav-item" href="#invoices"><FileText size={18}/>Invoices</a><a className="nav-item" href="#finance"><CreditCard size={18}/>Expenses & Profit</a><a className="nav-item" href="#billing"><CreditCard size={18}/>Billing & POS Pricing</a><a className="nav-item" href="#referrals"><Users size={18}/>Refer & Earn</a><a className="nav-item" href="#customers"><Users size={18}/>Customers</a><a className="nav-item" href="#operations"><Package size={18}/>Operations</a><a className="nav-item" href="#team"><Users size={18}/>Team Management</a><a className="nav-item" href="#people"><BriefcaseBusiness size={18}/>People & HR</a><a className="nav-item" href="#business-profile"><Building2 size={18}/>Business Profile</a><a className="nav-item" href="#network"><Building2 size={18}/>Business Network</a><a className="nav-item" href="#private-conversations"><LockKeyhole size={18}/>Private Conversations</a></nav>
       <div className="sidebar-bottom"><a className="nav-item" href="#settings"><Settings2 size={18}/>Settings</a><a className="nav-item" href="#help"><CircleHelp size={18}/>Help & support</a><button className="nav-item signout-button" onClick={signOut}><LogOut size={18}/>Sign out</button><div className="security-note"><ShieldCheck size={17}/><span>Designed with business data security at its core.</span></div></div>
     </aside>
     <main className="main-content" id="overview">
@@ -1094,6 +1180,7 @@ export default function App() {
       <section className="welcome-section"><div><div className="eyebrow">INTELLIGENCE FOR EVERY BUSINESS.</div><h1>Welcome,<br/><span>{session.user.full_name.split(" ")[0]}.</span></h1><p>Your {session.business.name} workspace is ready for connected sales, financial visibility and smarter growth decisions.</p><div className="workspace-created"><ShieldCheck size={16}/> Business workspace created successfully</div></div><div className="welcome-visual" aria-hidden="true"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="brain-core"><Bot size={52} strokeWidth={1.25}/></div><div className="orbit-dot dot-one"/><div className="orbit-dot dot-two"/><div className="orbit-dot dot-three"/><div className="visual-caption">BUSINESS INTELLIGENCE</div></div></section>
       <POSConnectionsWorkspace session={session} />
       <DailyCloseWorkspace session={session} />
+      <DiscrepancyWorkspace session={session} />
       <BillingWorkspace session={session} />
       <ReferralWorkspace session={session} />
       <SalesIntelligenceWorkspace session={session} />
