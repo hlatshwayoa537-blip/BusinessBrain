@@ -284,8 +284,7 @@ function DailyCloseWorkspace({session}:{session:AuthData}) {
         "Amounts counted/confirmed: "+Object.entries(reconciliation.actual_received||{}).map(([key,value])=>key+" R "+Number(value).toFixed(2)).join("; ")+".",
         "Variance (actual received minus current POS): "+lines.join("; ")+".",
         "This case records a difference for investigation. It does not change the daily close or POS transactions."
-      ].join("
-");
+      ].join("\n");
       await request("/discrepancies","POST",{
         daily_close_id:row.id,
         title:"POS reconciliation difference — "+row.branch_name+" · "+row.business_date,
