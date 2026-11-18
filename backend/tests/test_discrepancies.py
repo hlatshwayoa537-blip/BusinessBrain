@@ -119,6 +119,7 @@ def test_discrepancy_evidence_upload_is_scanned_audited_and_download_scoped(clie
     monkeypatch.setattr(evidence_routes, "object_head", lambda key: {
         "ContentLength": 1234, "ContentType": "application/pdf",
     })
+    monkeypatch.setattr(evidence_routes, "validate_object_content", lambda key, extension: None)
     monkeypatch.setattr(evidence_routes, "scan_object_with_clamav", lambda key: None)
     monkeypatch.setattr(evidence_routes, "promote_clean_object", lambda source, target: None)
     monkeypatch.setattr(evidence_routes, "presigned_download", lambda *args: "https://private-storage.invalid/download")
