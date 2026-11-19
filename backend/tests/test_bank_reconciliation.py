@@ -156,3 +156,98 @@ def test_bank_match_suggestions_can_link_exact_pos_sale(client):
     history = client.get("/api/v1/bank-reconciliation/transactions", headers=headers).json()
     assert history[0]["matched_source_type"] == "pos"
     assert history[0]["matched_source_id"] == pos_candidates[0]["source_id"]
+
+
+def test_pos_settlement_batch_requires_exact_total_and_returns_traceability(client):
+    owner = register(client, "bank-batch-owner@example.com", "Batch Owner", "Batch Shop")
+    headers = auth_headers(owner)
+    connection = client.post("/api/v1/pos/connections", headers=headers, json={
+        "provider_name": "Generic POS", "display_name": "Main till", "integration_method": "webhook"
+    }).json()
+    source_ids = []
+    for external_id, amount in [("BATCH-1", "60.00"), ("BATCH-2", "40.00")]:
+        payload = {
+            "external_transaction_id": external_id, "branch_name": "Bergville", "till_name": "Till 1",
+            "transaction_type": "sale", "occurred_at": "2026-11-18T10:00:00+02:00",
+            "currency": "ZAR", "gross_amount": amount, "discount_amount": "0.00",
+            "tax_amount": "0.00", "net_amount": amount, "payment_method": "card",
+        }
+        ingested = client.post(
+            f"/api/v1/pos/ingest/{connection['id']}",
+            headers={"X-Vexion-Secret": connection["webhook_secret"]}, json=payload,
+        )
+        assert ingested.status_code == 201
+        source_ids.append(ingested.json()["id"])
+    imported = client.post(
+        "/api/v1/bank-reconciliation/imports?account_label=Operating%20Account",
+        headers={**headers, "Content-Type": "text/csv"},
+        content="date,description,amount,reference\n2026-11-19,Card settlement,100.00,SET-BATCH-1\n",
+    )
+    assert imported.status_code == 201
+    bank_row = client.get(
+        "/api/v1/bank-reconciliation/transactions?reconciliation_status=unmatched", headers=headers
+    ).json()[0]
+    wrong_total = client.post(
+        f"/api/v1/bank-reconciliation/transactions/{bank_row['id']}/batch-match",
+        headers=headers, json={"source_ids": source_ids[:1]},
+    )
+    assert wrong_total.status_code == 422
+    confirmed = client.post(
+        f"/api/v1/bank-reconciliation/transactions/{bank_row['id']}/batch-match",
+        headers=headers, json={"source_ids": source_ids},
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["matched_source_count"] == 2
+    assert confirmed.json()["signed_total"] == "100.00"
+    matches = client.get(
+        f"/api/v1/bank-reconciliation/transactions/{bank_row['id']}/matches", headers=headers
+    )
+    assert matches.status_code == 200
+    assert {item["source_id"] for item in matches.json()["matches"]} == set(source_ids)
+
+
+def test_pos_settlement_batch_cannot_reuse_source_or_cross_business(client):
+    owner = register(client, "bank-batch-scope-owner@example.com", "Batch Owner", "Batch Owner Shop")
+    other = register(client, "bank-batch-scope-other@example.com", "Other Owner", "Batch Other Shop")
+    headers = auth_headers(owner)
+    connection = client.post("/api/v1/pos/connections", headers=headers, json={
+        "provider_name": "Generic POS", "display_name": "Main till", "integration_method": "webhook"
+    }).json()
+    source_ids = []
+    for index in range(2):
+        payload = {
+            "external_transaction_id": f"SCOPE-{index}", "branch_name": "Branch", "till_name": "Till 1",
+            "transaction_type": "sale", "occurred_at": "2026-11-18T10:00:00+02:00",
+            "currency": "ZAR", "gross_amount": "50.00", "discount_amount": "0.00",
+            "tax_amount": "0.00", "net_amount": "50.00", "payment_method": "card",
+        }
+        response = client.post(
+            f"/api/v1/pos/ingest/{connection['id']}",
+            headers={"X-Vexion-Secret": connection["webhook_secret"]}, json=payload,
+        )
+        assert response.status_code == 201
+        source_ids.append(response.json()["id"])
+    for reference in ["BATCH-A", "BATCH-B"]:
+        imported = client.post(
+            "/api/v1/bank-reconciliation/imports?account_label=Operating%20Account",
+            headers={**headers, "Content-Type": "text/csv"},
+            content=f"date,description,amount,reference\n2026-11-19,Card settlement,100.00,{reference}\n",
+        )
+        assert imported.status_code == 201
+    rows = client.get("/api/v1/bank-reconciliation/transactions?reconciliation_status=unmatched", headers=headers).json()
+    assert len(rows) == 2
+    first = client.post(
+        f"/api/v1/bank-reconciliation/transactions/{rows[0]['id']}/batch-match",
+        headers=headers, json={"source_ids": source_ids},
+    )
+    assert first.status_code == 200
+    reused = client.post(
+        f"/api/v1/bank-reconciliation/transactions/{rows[1]['id']}/batch-match",
+        headers=headers, json={"source_ids": source_ids},
+    )
+    assert reused.status_code == 409
+    denied = client.get(
+        f"/api/v1/bank-reconciliation/transactions/{rows[0]['id']}/matches",
+        headers=auth_headers(other),
+    )
+    assert denied.status_code == 404
