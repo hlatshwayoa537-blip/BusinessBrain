@@ -268,7 +268,11 @@ def inventory_profitability(
         rows.append({
             "inventory_item_id": item["inventory_item_id"], "sku": item["sku"],
             "description": item["description"], "quantity_sold": f"{item['quantity_sold']:.3f}",
+            "quantity_returned": f"{item['quantity_returned']:.3f}",
+            "net_quantity_sold": f"{(item['quantity_sold'] - item['quantity_returned']):.3f}",
             "line_revenue_before_transaction_discounts": f"{revenue:.2f}",
+            "refund_line_revenue": f"{item['refund_line_revenue']:.2f}",
+            "net_line_revenue_before_transaction_discounts": f"{(revenue - item['refund_line_revenue']):.2f}",
             "costed_quantity": f"{item['costed_quantity']:.3f}",
             "uncosted_quantity": f"{item['uncosted_quantity']:.3f}",
             "cost_of_goods_sold": f"{cogs:.2f}" if cost_complete else None,
