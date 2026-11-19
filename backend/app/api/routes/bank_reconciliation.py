@@ -282,6 +282,18 @@ def confirm_bank_match(
     selected = next((item for item in candidates if item["source_type"] == source_type and item["source_id"] == source_id), None)
     if not selected:
         raise HTTPException(status_code=422, detail="That record is not an eligible exact-amount/date candidate. Review it manually without linking.")
+    # Store single-record links in the same ledger as batch links. The database
+    # unique constraint then prevents a POS/finance source being linked by either
+    # workflow, including when two requests race.
+    db.add(BankStatementMatchLink(
+        business_id=membership.business_id,
+        bank_transaction_id=record.id,
+        source_type=source_type,
+        source_id=source_id,
+        signed_amount=Decimal(str(record.amount)).quantize(Decimal("0.01")),
+        source_date=date.fromisoformat(selected["source_date"]),
+        created_by_user_id=user.id,
+    ))
     record.matched_source_type = source_type
     record.matched_source_id = source_id
     record.reconciliation_status = "matched"
