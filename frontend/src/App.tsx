@@ -156,6 +156,40 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
     if (!response.ok) throw new Error(data.detail || "Finance request failed.");
     return data;
   }
+  async function loadBankRows() {
+    try {
+      const rows = await request("/bank-reconciliation/transactions?reconciliation_status=unmatched&limit=100");
+      setBankRows(rows as any[]);
+    } catch { setBankRows([]); }
+  }
+  async function importBankStatement() {
+    if (!bankFile || bankAccount.trim().length < 2) return;
+    setBankBusy(true); setError(""); setMessage("");
+    try {
+      const response = await fetch(API_BASE + "/bank-reconciliation/imports?filename=" + encodeURIComponent(bankFile.name) + "&account_label=" + encodeURIComponent(bankAccount.trim()), {
+        method: "POST",
+        headers: { Authorization: "Bearer " + session.access_token, "Content-Type": "text/csv" },
+        body: await bankFile.text(),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Bank statement could not be imported.");
+      setMessage("Statement imported: " + data.imported + " new rows, " + data.duplicates_skipped + " duplicates skipped.");
+      setBankFile(null);
+      const input = document.getElementById("vexion-bank-csv") as HTMLInputElement | null;
+      if (input) input.value = "";
+      await loadBankRows();
+    } catch (err) { setError(err instanceof Error ? err.message : "Bank statement import failed."); }
+    finally { setBankBusy(false); }
+  }
+  async function reviewBankRow(row: any) {
+    const note = window.prompt("Explain what this bank transaction was matched to. Do not guess; leave it unmatched if not verified.");
+    if (!note || note.trim().length < 3) return;
+    try {
+      await request("/bank-reconciliation/transactions/" + row.id + "/review", "POST", { status: "matched", note: note.trim() });
+      setMessage("Bank transaction review saved.");
+      await loadBankRows();
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not save bank review."); }
+  }
   async function loadFinance() {
     setLoading(true); setError("");
     try {
