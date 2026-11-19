@@ -14,13 +14,6 @@ def inventory_costing_summary(db, business_id: str, start_utc, end_utc, currency
         POSTransaction.occurred_at >= start_utc,
         POSTransaction.occurred_at < end_utc,
     )).all())
-    refund_count = db.scalar(select(POSTransaction.id).where(
-        POSTransaction.business_id == business_id,
-        POSTransaction.transaction_type == "refund",
-        POSTransaction.currency == currency,
-        POSTransaction.occurred_at >= start_utc,
-        POSTransaction.occurred_at < end_utc,
-    ).count()) if False else 0
     refund_count = len(db.scalars(select(POSTransaction.id).where(
         POSTransaction.business_id == business_id,
         POSTransaction.transaction_type == "refund",
