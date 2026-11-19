@@ -562,3 +562,21 @@ class BankStatementTransaction(Base):
     matched_source_type: Mapped[str | None] = mapped_column(String(24), nullable=True)
     matched_source_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class BankStatementMatchLink(Base):
+    __tablename__ = "bank_statement_match_links"
+    __table_args__ = (
+        UniqueConstraint("business_id", "source_type", "source_id", name="uq_bank_batch_source_business"),
+        UniqueConstraint("bank_transaction_id", "source_type", "source_id", name="uq_bank_batch_transaction_source"),
+        Index("ix_bank_batch_transaction", "business_id", "bank_transaction_id"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    bank_transaction_id: Mapped[str] = mapped_column(ForeignKey("bank_statement_transactions.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_type: Mapped[str] = mapped_column(String(24), nullable=False, default="pos")
+    source_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    signed_amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    source_date: Mapped[date] = mapped_column(Date, nullable=False)
+    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
