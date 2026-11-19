@@ -117,3 +117,42 @@ def test_bank_match_confirmation_rejects_non_candidate_and_tenant_leak(client):
     )
     assert denied.status_code == 422
     assert client.get(f"/api/v1/bank-reconciliation/transactions/{row['id']}/suggestions", headers=auth_headers(other)).status_code == 404
+
+
+def test_bank_match_suggestions_can_link_exact_pos_sale(client):
+    owner = register(client, "bank-pos-match@example.com", "POS Match Owner", "POS Match Shop")
+    headers = auth_headers(owner)
+    connection = client.post("/api/v1/pos/connections", headers=headers, json={
+        "provider_name": "Generic POS", "display_name": "Main till", "integration_method": "webhook"
+    }).json()
+    sale = {
+        "external_transaction_id": "POS-SETTLE-100",
+        "branch_name": "Bergville", "till_name": "Till 1",
+        "transaction_type": "sale", "occurred_at": "2026-11-19T10:00:00+02:00",
+        "currency": "ZAR", "gross_amount": "100.00", "discount_amount": "0.00",
+        "tax_amount": "13.04", "net_amount": "100.00", "payment_method": "card",
+    }
+    ingested = client.post(
+        f"/api/v1/pos/ingest/{connection['id']}",
+        headers={"X-Vexion-Secret": connection["webhook_secret"]}, json=sale,
+    )
+    assert ingested.status_code == 201
+    imported = client.post(
+        "/api/v1/bank-reconciliation/imports?account_label=Operating%20Account",
+        headers={**headers, "Content-Type": "text/csv"},
+        content="date,description,amount,reference\n2026-11-19,Card settlement,100.00,POS-SETTLE-100\n",
+    )
+    assert imported.status_code == 201
+    row = client.get("/api/v1/bank-reconciliation/transactions?reconciliation_status=unmatched", headers=headers).json()[0]
+    suggestions = client.get(f"/api/v1/bank-reconciliation/transactions/{row['id']}/suggestions", headers=headers).json()
+    pos_candidates = [item for item in suggestions["candidates"] if item["source_type"] == "pos"]
+    assert len(pos_candidates) == 1
+    assert pos_candidates[0]["reference_match"] is True
+    confirmed = client.post(
+        f"/api/v1/bank-reconciliation/transactions/{row['id']}/match",
+        headers=headers, json={"source_type": "pos", "source_id": pos_candidates[0]["source_id"]},
+    )
+    assert confirmed.status_code == 200
+    history = client.get("/api/v1/bank-reconciliation/transactions", headers=headers).json()
+    assert history[0]["matched_source_type"] == "pos"
+    assert history[0]["matched_source_id"] == pos_candidates[0]["source_id"]
