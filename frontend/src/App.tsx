@@ -108,6 +108,19 @@ function PublicCareers() {
 type FinanceRecord = { id: string; kind: "income" | "expense"; category: string; description: string; amount: string; currency: string; status: "paid" | "unpaid"; occurred_on: string; reference?: string | null; notes?: string | null };
 type FinanceSummary = { year: number; currency: string; income_total: string; manual_income_total: string; pos_sales_total: string; pos_refunds_total: string; pos_net_income_total: string; pos_transaction_count: number; expense_total: string; net_total: string; outstanding_income: string; unpaid_expenses: string; transaction_count: number; months: {month:number;income:string;expenses:string}[] };
 
+type SalesForecastData = {
+  status:"ready"|"insufficient_history";
+  currency:string;
+  observed_days:number;
+  transaction_count:number;
+  historical_totals:{sales:string;refunds:string;net_sales:string};
+  history:{date:string;sales:string;refunds:string;net_sales:string;transaction_count:number}[];
+  forecast:{date:string;weekday:string;observed_weekday_samples:number;projected_sales:string;projected_refunds:string;projected_net_sales:string}[];
+  projected_7_day_net_sales:string|null;
+  readiness:{minimum_observed_days:number;minimum_samples_per_weekday:number;ready:boolean;message:string};
+  limitations:string[];
+};
+
 function FinanceWorkspace({ session }: { session: AuthData }) {
   const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,10);
   const [records, setRecords] = useState<FinanceRecord[]>([]);
@@ -127,6 +140,7 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [reports, setReports] = useState<{pnl:any;cash:any;vat:any}|null>(null);
+  const [intelligence, setIntelligence] = useState<SalesForecastData|null>(null);
   async function request(path: string, method = "GET", body?: unknown) {
     const response = await fetch(API_BASE + path, { method, headers: { Authorization: "Bearer " + session.access_token, ...(body ? {"Content-Type":"application/json"} : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     if (response.status === 204) return null;
@@ -137,8 +151,8 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
   async function loadFinance() {
     setLoading(true); setError("");
     try {
-      const [rows, totals, pnl, cash, vat] = await Promise.all([request("/finance/transactions?year=" + year + (kindFilter === "all" ? "" : "&kind=" + kindFilter)), request("/finance/summary?year=" + year), request("/financial-reports/profit-loss?year=" + year), request("/financial-reports/cash-flow?year=" + year), request("/financial-reports/vat?year=" + year)]);
-      setRecords(rows as FinanceRecord[]); setSummary(totals as FinanceSummary); setReports({pnl, cash, vat});
+      const [rows, totals, pnl, cash, vat, bi] = await Promise.all([request("/finance/transactions?year=" + year + (kindFilter === "all" ? "" : "&kind=" + kindFilter)), request("/finance/summary?year=" + year), request("/financial-reports/profit-loss?year=" + year), request("/financial-reports/cash-flow?year=" + year), request("/financial-reports/vat?year=" + year), request("/business-intelligence/sales-forecast")]);
+      setRecords(rows as FinanceRecord[]); setSummary(totals as FinanceSummary); setReports({pnl, cash, vat}); setIntelligence(bi as SalesForecastData);
     } catch (err) { setError(err instanceof Error ? err.message : "Could not load financial records."); }
     finally { setLoading(false); }
   }
@@ -177,6 +191,20 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
       <p>Cash flow is a record-based operating movement, not a bank reconciliation. Bank data is not connected.</p>
       <p>VAT currently reports output VAT on issued VEXION invoices only. Input VAT and a VAT payable estimate are withheld until supplier tax invoices and verified purchase VAT are recorded.</p>
     </div>}
+    {intelligence && <section className="finance-report" style={{marginBottom:24}} aria-label="Business intelligence and sales forecast">
+      <div className="recruitment-card-heading"><div><span className="eyebrow">BUSINESS INTELLIGENCE</span><h3>POS sales trends &amp; 7-day outlook</h3></div><span className="profile-status">{intelligence.status==="ready"?"Indicative forecast":"History building"}</span></div>
+      <div className="finance-stats">
+        <article><span>Observed POS days</span><strong>{intelligence.observed_days}</strong><small>From {intelligence.transaction_count} received sales/refund transactions</small></article>
+        <article><span>Historical net sales</span><strong>{money(intelligence.historical_totals.net_sales)}</strong><small>Recorded ZAR sales less refunds in the lookback window</small></article>
+        <article><span>7-day projected net sales</span><strong>{intelligence.projected_7_day_net_sales===null?"Not available":money(intelligence.projected_7_day_net_sales)}</strong><small>{intelligence.status==="ready"?"Weekday-average projection":"No forecast generated"}</small></article>
+      </div>
+      {intelligence.status!=="ready" && <p className="finance-alert">{intelligence.readiness.message}</p>}
+      <p className="finance-disclaimer">Forecasts use only observed POS sales/refunds from the previous 56 complete South African business days. Missing transaction days are not treated as zero. VEXION cannot yet verify feed completeness or store opening hours, so projections are indicative—not guaranteed—and are not profit, expenses, cash balances or bank settlements.</p>
+      {intelligence.status==="ready" && <div className="finance-record-list">{intelligence.forecast.map(day=><article className="finance-record" key={day.date}><div className="finance-record-icon income">↗</div><div className="finance-record-info"><strong>{day.weekday} · {new Date(day.date+"T12:00:00").toLocaleDateString("en-ZA")}</strong><span>Based on {day.observed_weekday_samples} observed same-weekday samples · sales {money(day.projected_sales)} · refunds {money(day.projected_refunds)}</span></div><div className="finance-record-value"><strong>{money(day.projected_net_sales)}</strong><small>Projected net sales</small></div></article>)}</div>}
+      <div className="recruitment-card-heading" style={{marginTop:20}}><div><span className="eyebrow">RECORDED HISTORY</span><h3>Recent observed POS days</h3></div><span className="module-count">{intelligence.history.length} DAYS</span></div>
+      {intelligence.history.length===0?<p className="network-empty">No POS sales or refunds have been received for the selected history window. No historical trend or forecast is available.</p>:<div className="finance-record-list">{intelligence.history.slice(-14).reverse().map(day=><article className="finance-record" key={day.date}><div className="finance-record-icon income">•</div><div className="finance-record-info"><strong>{new Date(day.date+"T12:00:00").toLocaleDateString("en-ZA")}</strong><span>{day.transaction_count} received sales/refunds · sales {money(day.sales)} · refunds {money(day.refunds)}</span></div><div className="finance-record-value"><strong>{money(day.net_sales)}</strong><small>Recorded net sales</small></div></article>)}</div>}
+      <ul>{intelligence.limitations.map(item=><li key={item}>{item}</li>)}</ul>
+    </section>}
     <div className="finance-layout">
       <form className="finance-form" onSubmit={addRecord}><div className="recruitment-card-heading"><div><span className="eyebrow">NEW FINANCIAL RECORD</span><h3>Record other income or expense</h3></div></div>
         <div className="finance-kind-toggle"><button type="button" className={kind==="income"?"selected":""} onClick={()=>setKind("income")}>Income</button><button type="button" className={kind==="expense"?"selected":""} onClick={()=>setKind("expense")}>Expense</button></div>
