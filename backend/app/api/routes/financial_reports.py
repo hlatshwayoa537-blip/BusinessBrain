@@ -98,7 +98,7 @@ def profit_loss(
         "net_result_before_cogs": money(revenue - manual_expenses),
         "not_included": {"unpaid_manual_income": money(outstanding_income), "unpaid_manual_expenses": money(unpaid_expenses), "inventory_cost_of_goods_sold": None if cogs_complete else cogs_status},
         "source_counts": {"pos_transactions": len(pos), "manual_finance_records": len(manual)},
-        "data_quality": {"pos_feed_received": len(pos) > 0, "expenses_are_complete": False, "inventory_costing_complete": cogs_status, "uncosted_pos_lines": costing["uncosted_line_count"], "pos_refund_transactions": costing["refund_transaction_count"], "note": "COGS is included only when every recorded POS sale line has a linked inventory item and receipt cost, and no POS refunds require cost reversal. Missing costs are never treated as zero. Supplier purchase orders are not treated as paid expenses."},
+        "data_quality": {"pos_feed_received": len(pos) > 0, "expenses_are_complete": False, "inventory_costing_status": cogs_status, "uncosted_pos_lines": costing["uncosted_line_count"], "pos_refund_transactions": costing["refund_transaction_count"], "note": "COGS is included only when every recorded POS sale line has a linked inventory item and receipt cost, and no POS refunds require cost reversal. Missing costs are never treated as zero. Supplier purchase orders are not treated as paid expenses."},
     }
 
 
