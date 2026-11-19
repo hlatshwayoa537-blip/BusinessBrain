@@ -11,14 +11,13 @@ depends_on = None
 def upgrade() -> None:
     op.add_column("bank_statement_transactions", sa.Column("matched_source_type", sa.String(length=24), nullable=True))
     op.add_column("bank_statement_transactions", sa.Column("matched_source_id", sa.String(length=36), nullable=True))
-    op.create_unique_constraint(
-        "uq_bank_statement_matched_source",
-        "bank_statement_transactions",
-        ["business_id", "matched_source_type", "matched_source_id"],
+    op.create_index(
+        "uq_bank_statement_matched_source", "bank_statement_transactions",
+        ["business_id", "matched_source_type", "matched_source_id"], unique=True,
     )
 
 
 def downgrade() -> None:
-    op.drop_constraint("uq_bank_statement_matched_source", "bank_statement_transactions", type_="unique")
+    op.drop_index("uq_bank_statement_matched_source", table_name="bank_statement_transactions")
     op.drop_column("bank_statement_transactions", "matched_source_id")
     op.drop_column("bank_statement_transactions", "matched_source_type")
