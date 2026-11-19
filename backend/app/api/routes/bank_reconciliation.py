@@ -2,7 +2,7 @@ import csv
 import hashlib
 import io
 import uuid
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from decimal import Decimal, InvalidOperation
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -164,7 +164,7 @@ def bank_reconciliation_summary(user: User = Depends(get_current_user), db: Sess
 
 
 
-def _candidate_payload(source_type: str, source_id: str, label: str, amount, source_date, bank_row, reference_match: bool):
+def _candidate_payload(source_type: str, source_id: str, label: str, amount, source_date, reference_match: bool):
     return {
         "source_type": source_type,
         "source_id": source_id,
@@ -206,7 +206,7 @@ def _suggestions_for_bank_row(record: BankStatementTransaction, membership: Memb
         )):
             continue
         ref_match = bool(bank_reference and item.reference and bank_reference == item.reference.strip().casefold())
-        candidates.append(_candidate_payload("finance", item.id, item.description, item.amount, source_date, record, ref_match))
+        candidates.append(_candidate_payload("finance", item.id, item.description, item.amount, source_date, ref_match))
 
     pos_rows = db.scalars(select(POSTransaction).where(
         POSTransaction.business_id == membership.business_id,
@@ -229,7 +229,7 @@ def _suggestions_for_bank_row(record: BankStatementTransaction, membership: Memb
             continue
         ref_match = bool(bank_reference and item.external_transaction_id and bank_reference == item.external_transaction_id.strip().casefold())
         label = f"POS {item.transaction_type} · {item.branch_name or 'Branch not supplied'} · {item.till_name or 'Till not supplied'}"
-        candidates.append(_candidate_payload("pos", item.id, label, item.net_amount, source_date, record, ref_match))
+        candidates.append(_candidate_payload("pos", item.id, label, item.net_amount, source_date, ref_match))
 
     candidates.sort(key=lambda item: (not item["reference_match"], item["source_date"]))
     return candidates[:20]
