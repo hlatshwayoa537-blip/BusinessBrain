@@ -1,5 +1,6 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.routes.auth import get_current_user
 from app.db import get_db
 from app.models import InventoryItem, InventoryMovement, Membership, User
+from app.inventory_costing import inventory_costing_summary
 
 router = APIRouter(prefix="/inventory", tags=["inventory and stock"])
 MANAGERS = {"owner", "admin", "manager"}
@@ -235,4 +237,57 @@ def create_stock_adjustment(
         "movement_type": movement.movement_type, "quantity_delta": f"{Decimal(movement.quantity_delta):.3f}",
         "location": movement.location, "note": movement.note, "created_at": movement.created_at,
         "stock_after": f"{stock_at(db, membership.business_id, item.id, location):.3f}",
+    }
+
+
+@router.get("/profitability")
+def inventory_profitability(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    membership = membership_for(user, db)
+    if membership.role not in MANAGERS:
+        raise HTTPException(status_code=403, detail="Only an owner, administrator or manager can view profitability.")
+    if end_date < start_date:
+        raise HTTPException(status_code=422, detail="End date must be on or after start date.")
+    if (end_date - start_date).days > 365:
+        raise HTTPException(status_code=422, detail="Profitability periods cannot exceed 366 calendar days.")
+    tz = ZoneInfo("Africa/Johannesburg")
+    start_utc = datetime.combine(start_date, time.min, tzinfo=tz).astimezone(timezone.utc)
+    end_exclusive = date.fromordinal(end_date.toordinal() + 1)
+    end_utc = datetime.combine(end_exclusive, time.min, tzinfo=tz).astimezone(timezone.utc)
+    summary = inventory_costing_summary(db, membership.business_id, start_utc, end_utc)
+    rows = []
+    for item in summary["products"]:
+        cost_complete = item["uncosted_quantity"] == 0 and item["costed_quantity"] > 0
+        cogs = item["cogs"]
+        revenue = item["line_revenue"]
+        rows.append({
+            "inventory_item_id": item["inventory_item_id"], "sku": item["sku"],
+            "description": item["description"], "quantity_sold": f"{item['quantity_sold']:.3f}",
+            "line_revenue_before_transaction_discounts": f"{revenue:.2f}",
+            "costed_quantity": f"{item['costed_quantity']:.3f}",
+            "uncosted_quantity": f"{item['uncosted_quantity']:.3f}",
+            "cost_of_goods_sold": f"{cogs:.2f}" if cost_complete else None,
+            "gross_profit_before_transaction_discounts": f"{revenue - cogs:.2f}" if cost_complete else None,
+            "cost_status": "complete" if cost_complete else "incomplete",
+        })
+    return {
+        "period": {"start": start_date.isoformat(), "end_inclusive": end_date.isoformat(), "timezone": "Africa/Johannesburg"},
+        "currency": "ZAR", "sales_transaction_count": summary["sales_transaction_count"],
+        "sales_line_count": summary["sales_line_count"],
+        "uncosted_line_count": summary["uncosted_line_count"],
+        "uncosted_quantity": f"{summary['uncosted_quantity']:.3f}",
+        "cost_of_goods_sold": f"{summary['cogs']:.2f}" if summary["complete"] else None,
+        "cost_status": "complete" if summary["complete"] else "incomplete",
+        "products": rows,
+        "limitations": [
+            "Costs use quantity-weighted purchase receipt prices recorded before the POS sale was ingested.",
+            "Opening stock without a recorded purchase receipt has no assumed cost.",
+            "Transaction-level discounts are not allocated across product lines.",
+            "Refunds and returned-stock restocking are not included in this cost calculation.",
+            "Historical POS sales received before cost snapshots were introduced remain uncosted.",
+        ],
     }
