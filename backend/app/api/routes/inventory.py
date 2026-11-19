@@ -272,7 +272,7 @@ def inventory_profitability(
             "costed_quantity": f"{item['costed_quantity']:.3f}",
             "uncosted_quantity": f"{item['uncosted_quantity']:.3f}",
             "cost_of_goods_sold": f"{cogs:.2f}" if cost_complete else None,
-            "gross_profit_before_transaction_discounts": f"{revenue - cogs:.2f}" if cost_complete else None,
+            "gross_profit_before_transaction_discounts": f"{revenue - item['refund_line_revenue'] - cogs:.2f}" if cost_complete else None,
             "cost_status": "complete" if cost_complete else "incomplete",
         })
     return {
@@ -289,7 +289,7 @@ def inventory_profitability(
             "Costs use quantity-weighted purchase receipt prices recorded before the POS sale was ingested.",
             "Opening stock without a recorded purchase receipt has no assumed cost.",
             "Transaction-level discounts are not allocated across product lines.",
-            "Refunds and returned-stock restocking are not included in this cost calculation.",
+            "Refunds reverse COGS only when linked to the original sale line and restocked; unlinked or uncosted refunds keep coverage incomplete.",
             "Historical POS sales received before cost snapshots were introduced remain uncosted.",
         ],
     }
