@@ -262,7 +262,7 @@ def inventory_profitability(
     summary = inventory_costing_summary(db, membership.business_id, start_utc, end_utc)
     rows = []
     for item in summary["products"]:
-        cost_complete = item["uncosted_quantity"] == 0 and item["costed_quantity"] > 0 and summary["refund_transaction_count"] == 0
+        cost_complete = item["uncosted_quantity"] == 0 and (item["costed_quantity"] > 0 or item["quantity_returned"] > 0)
         cogs = item["cogs"]
         revenue = item["line_revenue"]
         rows.append({
