@@ -48,7 +48,9 @@ def test_profit_loss_and_cash_flow_use_paid_records_and_pos_ledger(client):
     data = pnl.json()
     assert data["revenue"]["total"] == "300.00"
     assert data["expenses"]["total"] == "40.00"
-    assert data["net_result"] == "260.00"
+    assert data["net_result"] is None
+    assert data["net_result_before_cogs"] == "260.00"
+    assert data["gross_profit_status"] == "incomplete"
     assert data["not_included"]["unpaid_manual_income"] == "500.00"
     assert data["not_included"]["unpaid_manual_expenses"] == "90.00"
 
