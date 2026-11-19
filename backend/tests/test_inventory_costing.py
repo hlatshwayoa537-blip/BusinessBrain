@@ -127,3 +127,35 @@ def test_unknown_opening_stock_prevents_false_cogs_even_after_receipts(client):
     assert profitability.status_code == 200
     assert profitability.json()["cost_status"] == "incomplete"
     assert profitability.json()["cost_of_goods_sold"] is None
+
+
+
+def test_pos_refund_keeps_cogs_incomplete_until_return_cost_is_reversed(client):
+    owner = register(client, "cogs-refund@example.com", "Refund Cost Store")
+    auth_headers = headers(owner)
+    prepare_receipt(client, auth_headers, sku="REFUND-01")
+    ingest_sale(client, auth_headers, "REFUND-01", "REFUND-SALE-1")
+
+    connection = client.post("/api/v1/pos/connections", headers=auth_headers, json={
+        "provider_name": "Generic POS", "display_name": "Refund till", "integration_method": "webhook"
+    })
+    assert connection.status_code == 201
+    refund = client.post(f"/api/v1/pos/ingest/{connection.json()['id']}", headers={
+        "X-Vexion-Secret": connection.json()["webhook_secret"]
+    }, json={
+        "external_transaction_id": "REFUND-1", "branch_name": "Main", "till_name": "Till 1",
+        "transaction_type": "refund", "occurred_at": "2026-11-18T11:00:00+02:00",
+        "currency": "ZAR", "gross_amount": "100.00", "discount_amount": "0.00",
+        "tax_amount": "13.04", "net_amount": "100.00", "payment_method": "card",
+        "items": [{"sku": "REFUND-01", "description": "Costed Product", "quantity": "1", "unit_price": "100.00"}]
+    })
+    assert refund.status_code == 201
+
+    profitability = client.get(
+        "/api/v1/inventory/profitability?start_date=2026-11-01&end_date=2026-11-30",
+        headers=auth_headers,
+    )
+    assert profitability.status_code == 200
+    assert profitability.json()["refund_transaction_count"] == 1
+    assert profitability.json()["cost_status"] == "incomplete"
+    assert profitability.json()["cost_of_goods_sold"] is None
