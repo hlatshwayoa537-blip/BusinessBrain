@@ -2,7 +2,7 @@
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0023_bank_statement_reconciliation"
+revision = "0023_bank_stmt_recon"
 down_revision = "0022_expense_workflows"
 branch_labels = None
 depends_on = None
