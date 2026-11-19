@@ -195,6 +195,7 @@ def list_inventory_movements(
         "item_name": names.get(row.inventory_item_id, "Item unavailable"),
         "movement_type": row.movement_type, "quantity_delta": f"{Decimal(row.quantity_delta):.3f}",
         "location": row.location, "source_type": row.source_type, "source_id": row.source_id,
+        "unit_cost": f"{Decimal(row.unit_cost):.4f}" if row.unit_cost is not None else None,
         "note": row.note, "created_by_user_id": row.created_by_user_id, "created_at": row.created_at,
     } for row in rows]
 
