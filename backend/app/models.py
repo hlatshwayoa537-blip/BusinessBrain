@@ -525,3 +525,38 @@ class InventoryMovement(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class BankStatementImport(Base):
+    __tablename__ = "bank_statement_imports"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    filename: Mapped[str] = mapped_column(String(180), nullable=False)
+    account_label: Mapped[str] = mapped_column(String(120), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="ZAR")
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    imported_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    duplicate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class BankStatementTransaction(Base):
+    __tablename__ = "bank_statement_transactions"
+    __table_args__ = (UniqueConstraint("business_id", "fingerprint", name="uq_bank_statement_business_fingerprint"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    import_id: Mapped[str] = mapped_column(ForeignKey("bank_statement_imports.id", ondelete="CASCADE"), nullable=False, index=True)
+    transaction_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    description: Mapped[str] = mapped_column(String(240), nullable=False)
+    reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="ZAR")
+    running_balance: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    reconciliation_status: Mapped[str] = mapped_column(String(20), nullable=False, default="unmatched", index=True)
+    review_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
