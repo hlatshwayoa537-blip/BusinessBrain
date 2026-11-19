@@ -106,6 +106,17 @@ def ingest_transaction(
     occurred_at = payload.occurred_at
     if occurred_at.tzinfo is None:
         occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+    original_sale = None
+    if payload.transaction_type == "refund" and payload.original_transaction_id:
+        original_sale = db.scalar(select(POSTransaction).where(
+            POSTransaction.id == payload.original_transaction_id,
+            POSTransaction.business_id == connection.business_id,
+            POSTransaction.transaction_type == "sale",
+        ))
+        if not original_sale:
+            raise HTTPException(status_code=422, detail="The referenced original sale was not found in this business.")
+        if not payload.items or any(not item.original_line_id for item in payload.items):
+            raise HTTPException(status_code=422, detail="Each linked refund item must identify its original sale line.")
     record = POSTransaction(
         id=str(uuid.uuid4()), business_id=connection.business_id, connection_id=connection.id,
         external_transaction_id=payload.external_transaction_id,
@@ -145,6 +156,45 @@ def ingest_transaction(
                 note=f"POS sale {record.external_transaction_id}",
                 created_by_user_id=connection.created_by_user_id,
             ))
+        elif record.transaction_type == "refund" and original_sale:
+            original_line = db.scalar(select(POSTransactionLine).where(
+                POSTransactionLine.id == item.original_line_id,
+                POSTransactionLine.transaction_id == original_sale.id,
+                POSTransactionLine.business_id == connection.business_id,
+            ))
+            if not original_line:
+                raise HTTPException(status_code=422, detail="A refund line does not belong to the referenced original sale.")
+            if (sku or None) != (original_line.sku or None) or (inventory_item.id if inventory_item else None) != original_line.inventory_item_id:
+                raise HTTPException(status_code=422, detail="Refund item SKU does not match the original sale line.")
+            already_returned = db.scalar(select(func.coalesce(func.sum(POSTransactionLine.quantity), 0)).select_from(InventoryMovement).join(
+                POSTransactionLine, InventoryMovement.source_line_id == POSTransactionLine.id,
+            ).where(
+                InventoryMovement.business_id == connection.business_id,
+                InventoryMovement.source_type == "pos_return",
+                InventoryMovement.source_id == original_line.id,
+            )) or Decimal("0")
+            if Decimal(already_returned) + item.quantity > Decimal(original_line.quantity):
+                raise HTTPException(status_code=422, detail="Refund quantity exceeds the unreturned quantity on the original sale line.")
+            if inventory_item:
+                original_cost_movement = db.scalar(select(InventoryMovement).where(
+                    InventoryMovement.business_id == connection.business_id,
+                    InventoryMovement.source_type == "pos_transaction",
+                    InventoryMovement.source_event_id == original_sale.id,
+                    InventoryMovement.source_line_id == original_line.id,
+                    InventoryMovement.movement_type == "pos_sale",
+                ))
+                db.add(InventoryMovement(
+                    id=str(uuid.uuid4()), business_id=connection.business_id,
+                    inventory_item_id=inventory_item.id,
+                    movement_type="pos_return_restock" if item.restock else "pos_return_nonrestock",
+                    quantity_delta=item.quantity if item.restock else Decimal("0"),
+                    location=original_cost_movement.location if original_cost_movement else stock_location,
+                    source_type="pos_return", source_id=original_line.id,
+                    source_event_id=record.id, source_line_id=line.id,
+                    unit_cost=original_cost_movement.unit_cost if original_cost_movement else None,
+                    note=f"POS refund {record.external_transaction_id}; original sale {original_sale.external_transaction_id}",
+                    created_by_user_id=connection.created_by_user_id,
+                ))
     connection.last_received_at = datetime.now(timezone.utc)
     connection.status = "active"
     try:
