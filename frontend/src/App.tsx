@@ -970,11 +970,18 @@ function ReferralWorkspace({session}:{session:AuthData}) {
 
 
 type InventoryItemRecord = { id:string; sku?:string|null; name:string; unit:string; reorder_level:string; is_active:boolean; stock_total:string; stock_by_location:Record<string,string>; below_reorder_level:boolean; negative_stock:boolean };
-type InventoryMovementRecord = { id:string; item_name:string; movement_type:string; quantity_delta:string; location:string; source_type:string; note?:string|null; created_at:string };
+type InventoryMovementRecord = { id:string; item_name:string; movement_type:string; quantity_delta:string; location:string; source_type:string; unit_cost?:string|null; note?:string|null; created_at:string };
+type InventoryProfitProduct = { inventory_item_id:string|null; sku:string|null; description:string; quantity_sold:string; line_revenue_before_transaction_discounts:string; costed_quantity:string; uncosted_quantity:string; cost_of_goods_sold:string|null; gross_profit_before_transaction_discounts:string|null; cost_status:string };
+type InventoryProfitability = { period:{start:string;end_inclusive:string;timezone:string}; currency:string; sales_transaction_count:number; sales_line_count:number; refund_transaction_count:number; uncosted_line_count:number; uncosted_quantity:string; cost_of_goods_sold:string|null; cost_status:string; products:InventoryProfitProduct[]; limitations:string[] };
 
 function InventoryWorkspace({session}:{session:AuthData}) {
   const [items,setItems]=useState<InventoryItemRecord[]>([]);
   const [movements,setMovements]=useState<InventoryMovementRecord[]>([]);
+  const [profitability,setProfitability]=useState<InventoryProfitability|null>(null);
+  const now=new Date();
+  const localDate=(d:Date)=>new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);
+  const [profitStart,setProfitStart]=useState(localDate(new Date(now.getFullYear(),now.getMonth(),1)));
+  const [profitEnd,setProfitEnd]=useState(localDate(now));
   const [name,setName]=useState("");
   const [sku,setSku]=useState("");
   const [unit,setUnit]=useState("unit");
@@ -995,7 +1002,13 @@ function InventoryWorkspace({session}:{session:AuthData}) {
       setItems(itemRows as InventoryItemRecord[]);setMovements(movementRows as InventoryMovementRecord[]);
     } catch(err){setError(err instanceof Error?err.message:"Could not load stock records.");}
   }
-  useEffect(()=>{void refresh();},[session.access_token]);
+  async function loadProfitability() {
+    try {
+      const data=await request("/inventory/profitability?start_date="+encodeURIComponent(profitStart)+"&end_date="+encodeURIComponent(profitEnd));
+      setProfitability(data as InventoryProfitability);
+    } catch(err){setError(err instanceof Error?err.message:"Could not load inventory profitability.");}
+  }
+  useEffect(()=>{void refresh();void loadProfitability();},[session.access_token]);
   async function createItem(event:FormEvent<HTMLFormElement>) {
     event.preventDefault();setBusy(true);setError("");setMessage("");
     try {
@@ -1014,13 +1027,13 @@ function InventoryWorkspace({session}:{session:AuthData}) {
     try {
       await request("/inventory/items/"+item.id+"/adjustments","POST",{quantity_delta:Number(draft.quantity),location:draft.location||"Main",reason:draft.reason});
       setAdjustments(current=>({...current,[item.id]:{quantity:"",location:draft.location||"Main",reason:""}}));
-      setMessage("Stock movement recorded for "+item.name+".");await refresh();
+      setMessage("Stock movement recorded for "+item.name+".");await refresh();await loadProfitability();
     } catch(err){setError(err instanceof Error?err.message:"Stock movement could not be recorded.");}
   }
   const fmt=(value:string)=>Number(value).toLocaleString("en-ZA",{minimumFractionDigits:3,maximumFractionDigits:3});
   return <section className="finance-centre" id="inventory-stock">
     <div className="profile-centre-heading"><div><div className="eyebrow">INVENTORY & STOCK CONTROL</div><h2>Know what is actually on hand.</h2><p>Stock is calculated from recorded movements, not estimates or assumed opening balances.</p></div><span className="profile-status">Movement-ledger stock</span></div>
-    <p className="finance-alert">POS connections can now send item-level SKUs and quantities. Matched sale items deduct stock automatically; totals-only feeds, unmapped SKUs and CSV imports without item lines do not. Refunds are recorded but do not restock automatically because returned goods must be verified.</p>
+    <p className="finance-alert">POS connections can send item-level SKUs and quantities. Matched sale items deduct stock automatically; totals-only feeds, unmapped SKUs and CSV imports without item lines do not. Refunds are not restocked automatically because returned goods must be verified.</p>
     {error&&<p className="finance-alert" role="alert">{error}</p>}{message&&<p className="finance-success" role="status">{message}</p>}
     <form className="finance-form" onSubmit={createItem}>
       <h3>Add inventory item</h3>
@@ -1038,7 +1051,22 @@ function InventoryWorkspace({session}:{session:AuthData}) {
         {item.is_active&&<div className="purchase-line-draft"><h4>Record verified stock movement</h4><div className="finance-toolbar"><label>Quantity change (+ or −)<input type="number" step="0.001" value={adjustments[item.id]?.quantity||""} onChange={e=>setAdjustment(item.id,"quantity",e.target.value)} placeholder="+10 or -2"/></label><label>Location<input value={adjustments[item.id]?.location||"Main"} onChange={e=>setAdjustment(item.id,"location",e.target.value)} /></label><label>Reason<input value={adjustments[item.id]?.reason||""} onChange={e=>setAdjustment(item.id,"reason",e.target.value)} placeholder="Opening count / damaged goods"/></label></div><button type="button" className="network-secondary-button" onClick={()=>void adjust(item)}>Record stock movement</button></div>}
       </article>)}
     </div>
-    <div className="finance-form"><h3>Recent stock movement history</h3>{movements.length===0?<p className="network-empty">No stock movements have been recorded.</p>:movements.map(move=><article className="network-list-card" key={move.id}><strong>{move.item_name} · {move.quantity_delta}</strong><span>{move.movement_type.replaceAll("_"," ")} · {move.location} · {move.source_type}</span><small>{move.note||"No note"} · {new Date(move.created_at).toLocaleString("en-ZA")}</small></article>)}</div>
+    <div className="finance-form">
+      <div className="profile-centre-heading"><div><h3>Product profitability & cost coverage</h3><p>Uses recorded purchase receipts and item-level POS sales. No missing cost is treated as zero.</p></div></div>
+      <div className="finance-toolbar"><label>From<input type="date" value={profitStart} onChange={e=>setProfitStart(e.target.value)}/></label><label>To<input type="date" value={profitEnd} onChange={e=>setProfitEnd(e.target.value)}/></label><button type="button" className="network-primary-button" disabled={!profitStart||!profitEnd||profitEnd<profitStart} onClick={()=>void loadProfitability()}>Calculate profitability</button></div>
+      {profitability&&<>
+        <p className={profitability.cost_status==="complete"?"finance-success":"finance-alert"}>Cost coverage: {profitability.cost_status.replaceAll("_"," ")} · {profitability.sales_transaction_count} POS sale(s) · {profitability.uncosted_line_count} uncosted line(s) · {profitability.refund_transaction_count} refund(s) not reversed.</p>
+        <div className="purchase-order-line"><span>Cost of goods sold</span><strong>{profitability.cost_of_goods_sold===null?"Not available — incomplete cost data":"R "+Number(profitability.cost_of_goods_sold).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></div>
+        {profitability.products.length===0?<p className="network-empty">No item-level POS sales were recorded in this period.</p>:profitability.products.map((product,index)=><article className="network-list-card" key={(product.inventory_item_id||product.sku||product.description)+"-"+index}>
+          <strong>{product.description} · {product.sku||"No SKU"}</strong>
+          <span>Qty {fmt(product.quantity_sold)} · Sales before transaction discounts R {product.line_revenue_before_transaction_discounts}</span>
+          <span>COGS {product.cost_of_goods_sold===null?"Not available":"R "+product.cost_of_goods_sold} · Gross profit {product.gross_profit_before_transaction_discounts===null?"Not available":"R "+product.gross_profit_before_transaction_discounts}</span>
+          <small>{product.cost_status.replaceAll("_"," ")}</small>
+        </article>)}
+        <details><summary>Costing limitations</summary>{profitability.limitations.map((item,index)=><p key={index}><small>{item}</small></p>)}</details>
+      </>}
+    </div>
+    <div className="finance-form"><h3>Recent stock movement history</h3>{movements.length===0?<p className="network-empty">No stock movements have been recorded.</p>:movements.map(move=><article className="network-list-card" key={move.id}><strong>{move.item_name} · {move.quantity_delta}</strong><span>{move.movement_type.replaceAll("_"," ")} · {move.location} · {move.source_type}{move.unit_cost!==undefined&&move.unit_cost!==null?" · Unit cost R "+move.unit_cost:""}</span><small>{move.note||"No note"} · {new Date(move.created_at).toLocaleString("en-ZA")}</small></article>)}</div>
   </section>;
 }
 

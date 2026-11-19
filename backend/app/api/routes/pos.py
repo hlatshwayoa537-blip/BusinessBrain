@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.routes.auth import get_current_user
 from app.db import get_db
 from app.models import InventoryItem, InventoryMovement, Membership, POSConnection, POSTransaction, POSTransactionLine, User
+from app.inventory_costing import current_weighted_average_cost
 from app.schemas_pos import POSConnectionCreate, POSConnectionCreated, POSConnectionResponse, POSIngestTransaction, POSTransactionResponse, POSSalesSummary
 
 router = APIRouter(prefix="/pos", tags=["POS integrations"])
@@ -134,12 +135,13 @@ def ingest_transaction(
         )
         db.add(line)
         if record.transaction_type == "sale" and inventory_item:
+            weighted_unit_cost = current_weighted_average_cost(db, connection.business_id, inventory_item.id, stock_location, item.quantity)
             db.add(InventoryMovement(
                 id=str(uuid.uuid4()), business_id=connection.business_id,
                 inventory_item_id=inventory_item.id, movement_type="pos_sale",
                 quantity_delta=-item.quantity, location=stock_location,
                 source_type="pos_transaction", source_id=record.id,
-                source_event_id=record.id, source_line_id=line.id,
+                source_event_id=record.id, source_line_id=line.id, unit_cost=weighted_unit_cost,
                 note=f"POS sale {record.external_transaction_id}",
                 created_by_user_id=connection.created_by_user_id,
             ))

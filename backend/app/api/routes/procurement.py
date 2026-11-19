@@ -401,7 +401,7 @@ def receive_purchase_order(order_id: str, payload: GoodsReceiptCreate, db: Sessi
                 inventory_item_id=line.product_id, movement_type="purchase_receipt",
                 quantity_delta=receipt.quantity, location=location,
                 source_type="purchase_order", source_id=order.id,
-                source_event_id=receipt_event.id, source_line_id=line.id,
+                source_event_id=receipt_event.id, source_line_id=line.id, unit_cost=Decimal(line.unit_price),
                 note=f"Goods received against {order.reference}",
                 created_by_user_id=user.id,
             ))

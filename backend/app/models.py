@@ -522,6 +522,7 @@ class InventoryMovement(Base):
     source_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     source_event_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     source_line_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    unit_cost: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
