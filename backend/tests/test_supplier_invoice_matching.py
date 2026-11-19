@@ -88,3 +88,12 @@ def test_supplier_invoices_are_tenant_isolated(client):
     assert invoice.status_code == 201
     assert client.get("/api/v1/supplier-invoices", headers=other).json() == []
     assert client.get(f"/api/v1/supplier-invoices/{invoice.json()['id']}", headers=other).status_code == 404
+
+
+def test_supplier_invoice_cannot_allocate_same_po_line_twice(client):
+    auth = register(client, "supplier-invoice-repeat-line@example.com", "Repeated Line Store")
+    supplier_id, order_id, line_id = received_order(client, auth)
+    payload = invoice_payload(supplier_id, order_id, line_id, "INV-REPEAT")
+    payload["lines"].append(dict(payload["lines"][0]))
+    response = client.post("/api/v1/supplier-invoices", headers=auth, json=payload)
+    assert response.status_code == 422
