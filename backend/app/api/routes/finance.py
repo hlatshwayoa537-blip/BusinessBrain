@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.api.routes.auth import get_current_user
 from app.db import get_db
 from app.models import FinanceTransaction, Membership, POSTransaction, User
-from app.schemas_finance import FinanceSummaryResponse, FinanceTransactionCreate, FinanceTransactionResponse
+from app.schemas_finance import FinanceSummaryResponse, FinanceTransactionCreate, FinanceTransactionResponse, FinanceTransactionUpdate
 
 router = APIRouter(prefix="/finance", tags=["finance"])
 ZERO = Decimal("0.00")
@@ -53,6 +53,10 @@ def create_transaction(
 ):
     membership = current_membership(user, db)
     require_finance_admin(membership)
+    if payload.kind != "expense" and any((payload.payee_name, payload.due_on, payload.payment_method, payload.tax_amount)):
+        raise HTTPException(status_code=422, detail="Payee, due date, payment method and supplier VAT details are only valid for expenses.")
+    if payload.status == "unpaid" and payload.paid_on is not None:
+        raise HTTPException(status_code=422, detail="An unpaid record cannot have a paid date.")
     record = FinanceTransaction(
         business_id=membership.business_id,
         created_by_user_id=user.id,
@@ -65,8 +69,42 @@ def create_transaction(
         occurred_on=payload.occurred_on,
         reference=payload.reference,
         notes=payload.notes,
+        payee_name=payload.payee_name,
+        due_on=payload.due_on,
+        paid_on=payload.paid_on or (datetime.now(BUSINESS_TIMEZONE).date() if payload.status == "paid" else None),
+        payment_method=payload.payment_method,
+        tax_amount=payload.tax_amount,
     )
     db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record
+
+@router.patch("/transactions/{transaction_id}", response_model=FinanceTransactionResponse)
+def update_transaction(
+    transaction_id: str,
+    payload: FinanceTransactionUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    membership = current_membership(user, db)
+    require_finance_admin(membership)
+    record = db.scalar(select(FinanceTransaction).where(
+        FinanceTransaction.id == transaction_id,
+        FinanceTransaction.business_id == membership.business_id,
+    ))
+    if not record:
+        raise HTTPException(status_code=404, detail="Financial record not found.")
+    changes = payload.model_dump(exclude_unset=True)
+    if record.kind != "expense" and any(key in changes for key in {"due_on", "payee_name", "payment_method", "tax_amount"}):
+        raise HTTPException(status_code=422, detail="Expense details can only be changed on expense records.")
+    for key, value in changes.items():
+        setattr(record, key, value)
+    if "status" in changes:
+        if record.status == "paid" and "paid_on" not in changes and record.paid_on is None:
+            record.paid_on = datetime.now(BUSINESS_TIMEZONE).date()
+        elif record.status == "unpaid":
+            record.paid_on = None
     db.commit()
     db.refresh(record)
     return record

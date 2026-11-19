@@ -200,6 +200,11 @@ class FinanceTransaction(Base):
     occurred_on: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payee_name: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    due_on: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    paid_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    payment_method: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    tax_amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 

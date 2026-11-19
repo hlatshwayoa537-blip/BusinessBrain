@@ -15,6 +15,20 @@ class FinanceTransactionCreate(BaseModel):
     occurred_on: date
     reference: str | None = Field(default=None, max_length=100)
     notes: str | None = Field(default=None, max_length=2000)
+    payee_name: str | None = Field(default=None, max_length=180)
+    due_on: date | None = None
+    paid_on: date | None = None
+    payment_method: Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=40)] | None = None
+    tax_amount: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=2)
+
+class FinanceTransactionUpdate(BaseModel):
+    status: FinanceStatus | None = None
+    paid_on: date | None = None
+    due_on: date | None = None
+    payee_name: str | None = Field(default=None, max_length=180)
+    payment_method: Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=40)] | None = None
+    tax_amount: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=2)
+    notes: str | None = Field(default=None, max_length=2000)
 
 class FinanceTransactionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -28,6 +42,11 @@ class FinanceTransactionResponse(BaseModel):
     occurred_on: date
     reference: str | None = None
     notes: str | None = None
+    payee_name: str | None = None
+    due_on: date | None = None
+    paid_on: date | None = None
+    payment_method: str | None = None
+    tax_amount: Decimal | None = None
     created_at: datetime
 
 class FinanceMonthSummary(BaseModel):

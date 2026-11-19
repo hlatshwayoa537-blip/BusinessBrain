@@ -105,7 +105,7 @@ function PublicCareers() {
 }
 
 
-type FinanceRecord = { id: string; kind: "income" | "expense"; category: string; description: string; amount: string; currency: string; status: "paid" | "unpaid"; occurred_on: string; reference?: string | null; notes?: string | null };
+type FinanceRecord = { id: string; kind: "income" | "expense"; category: string; description: string; amount: string; currency: string; status: "paid" | "unpaid"; occurred_on: string; reference?: string | null; notes?: string | null; payee_name?: string | null; due_on?: string | null; paid_on?: string | null; payment_method?: string | null; tax_amount?: string | null };
 type FinanceSummary = { year: number; currency: string; income_total: string; manual_income_total: string; pos_sales_total: string; pos_refunds_total: string; pos_net_income_total: string; pos_transaction_count: number; expense_total: string; net_total: string; outstanding_income: string; unpaid_expenses: string; transaction_count: number; months: {month:number;income:string;expenses:string}[] };
 
 type SalesForecastData = {
@@ -135,6 +135,10 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
   const [occurredOn, setOccurredOn] = useState(today);
   const [reference, setReference] = useState("");
   const [notes, setNotes] = useState("");
+  const [payeeName, setPayeeName] = useState("");
+  const [dueOn, setDueOn] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("");
+  const [taxAmount, setTaxAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -160,10 +164,15 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
   async function addRecord(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setMessage(""); setError("");
     try {
-      await request("/finance/transactions", "POST", {kind,category,description,amount,status,occurred_on:occurredOn,reference:reference||null,notes:notes||null});
-      setDescription(""); setAmount(""); setReference(""); setNotes(""); setMessage("Financial record saved."); await loadFinance();
+      await request("/finance/transactions", "POST", {kind,category,description,amount,status,occurred_on:occurredOn,reference:reference||null,notes:notes||null,payee_name:kind==="expense"?(payeeName||null):null,due_on:kind==="expense"?(dueOn||null):null,payment_method:kind==="expense"?(paymentMethod||null):null,tax_amount:kind==="expense"&&taxAmount?taxAmount:null});
+      setDescription(""); setAmount(""); setReference(""); setNotes(""); setPayeeName(""); setDueOn(""); setPaymentMethod(""); setTaxAmount(""); setMessage("Financial record saved."); await loadFinance();
     } catch (err) { setError(err instanceof Error ? err.message : "Could not save this record."); }
     finally { setBusy(false); }
+  }
+  async function markExpensePaid(record: FinanceRecord) {
+    setError(""); setMessage("");
+    try { await request("/finance/transactions/" + record.id, "PATCH", {status:"paid",paid_on:today}); setMessage("Expense marked as paid."); await loadFinance(); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not update this expense."); }
   }
   async function deleteRecord(record: FinanceRecord) {
     if (!window.confirm("Delete this financial record? This cannot be undone.")) return;
@@ -210,11 +219,13 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
         <div className="finance-kind-toggle"><button type="button" className={kind==="income"?"selected":""} onClick={()=>setKind("income")}>Income</button><button type="button" className={kind==="expense"?"selected":""} onClick={()=>setKind("expense")}>Expense</button></div>
         <label>Category<input required minLength={2} maxLength={80} value={category} onChange={e=>setCategory(e.target.value)} placeholder={kind==="income"?"Other income only — not POS sales":"Rent, stock, utilities…"}/></label>
         <label>Description<input required minLength={2} maxLength={240} value={description} onChange={e=>setDescription(e.target.value)} placeholder="What was this payment for?"/></label>
+        {kind==="expense" && <label>Payee / supplier (optional)<input maxLength={180} value={payeeName} onChange={e=>setPayeeName(e.target.value)} placeholder="Who must be paid or was paid?"/></label>}
         <div className="finance-form-row"><label>Amount<input required type="number" inputMode="decimal" min="0.01" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="Enter amount"/><small className="finance-input-hint">Enter the number in South African rand (R).</small></label><label>Date<input required type="date" value={occurredOn} onChange={e=>setOccurredOn(e.target.value)}/></label></div>
         <div className="finance-form-row"><label>Payment status<select value={status} onChange={e=>setStatus(e.target.value as "paid"|"unpaid")}><option value="paid">Paid</option><option value="unpaid">Unpaid / outstanding</option></select></label><label>Reference (optional)<input maxLength={100} value={reference} onChange={e=>setReference(e.target.value)} placeholder="Receipt / invoice no."/></label></div>
+        {kind==="expense" && <><div className="finance-form-row"><label>Due date (optional)<input type="date" value={dueOn} onChange={e=>setDueOn(e.target.value)}/></label><label>Payment method (optional)<select value={paymentMethod} onChange={e=>setPaymentMethod(e.target.value)}><option value="">Not recorded</option><option value="cash">Cash</option><option value="card">Card</option><option value="eft">EFT / bank transfer</option><option value="debit_order">Debit order</option><option value="other">Other</option></select></label></div><label>VAT amount shown on supplier document (optional)<input type="number" min="0" step="0.01" value={taxAmount} onChange={e=>setTaxAmount(e.target.value)} placeholder="Enter only if shown on the document"/></label></>}
         <label>Notes (optional)<textarea rows={3} maxLength={2000} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Additional details…"/></label>
         <button className="auth-submit" type="submit" disabled={busy}>{busy?"Saving record…":"Save financial record"} <ArrowUpRight size={16}/></button>
-        <p className="finance-disclaimer">POS sales and refunds are imported automatically from received POS transactions. Use manual income only for income outside POS sales, to avoid double-counting. Expenses remain recorded here until a connected source supplies them. Only owners and administrators can add or delete records.</p>
+        <p className="finance-disclaimer">POS sales and refunds are imported automatically from received POS transactions. Use manual income only for income outside POS sales, to avoid double-counting. Expense payees, due dates and payment details are manually recorded; supplier VAT is captured for reference only and is not included in VAT reports. Only owners and administrators can add or update records.</p>
       </form>
       <div className="finance-report"><div className="recruitment-card-heading"><div><span className="eyebrow">MONTHLY CASH MOVEMENT</span><h3>{year} overview</h3></div><span className="module-count">{summary?.transaction_count ?? 0} RECORDS</span></div>
         <div className="finance-chart">{(summary?.months ?? []).map(item=><div className="finance-month" key={item.month}><div className="finance-bars"><span title={"Income "+money(item.income)} style={{height:Math.max(2,Number(item.income)/maxMonth*100)+"%"}}/><span title={"Expenses "+money(item.expenses)} style={{height:Math.max(2,Number(item.expenses)/maxMonth*100)+"%"}}/></div><small>{new Date(year,item.month-1,1).toLocaleString("en-ZA",{month:"short"})}</small></div>)}</div>
@@ -222,7 +233,7 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
       </div>
     </div>
     <div className="finance-records"><div className="recruitment-card-heading"><div><span className="eyebrow">YOUR BOOKKEEPING</span><h3>Financial records</h3></div><select aria-label="Filter financial records" value={kindFilter} onChange={e=>setKindFilter(e.target.value)}><option value="all">All records</option><option value="income">Income only</option><option value="expense">Expenses only</option></select></div>
-      {loading?<p className="network-empty">Loading financial records…</p>:records.length===0?<p className="network-empty">No financial records for this year yet. Add your first income or expense above.</p>:<div className="finance-record-list">{records.map(record=><article className="finance-record" key={record.id}><div className={"finance-record-icon "+record.kind}>{record.kind==="income"?"↗":"↘"}</div><div className="finance-record-info"><strong>{record.description}</strong><span>{record.category} · {new Date(record.occurred_on+"T12:00:00").toLocaleDateString("en-ZA")} · {record.reference||"No reference"}</span></div><div className="finance-record-value"><strong>{money(record.amount)}</strong><small className={"finance-record-status "+record.status}>{record.status}</small></div><button type="button" className="network-secondary-button" onClick={()=>void deleteRecord(record)}>Delete</button></article>)}</div>}
+      {loading?<p className="network-empty">Loading financial records…</p>:records.length===0?<p className="network-empty">No financial records for this year yet. Add your first income or expense above.</p>:<div className="finance-record-list">{records.map(record=>{const overdue=record.kind==="expense"&&record.status==="unpaid"&&!!record.due_on&&record.due_on<today;return <article className="finance-record" key={record.id}><div className={"finance-record-icon "+record.kind}>{record.kind==="income"?"↗":"↘"}</div><div className="finance-record-info"><strong>{record.description}</strong><span>{record.category} · {new Date(record.occurred_on+"T12:00:00").toLocaleDateString("en-ZA")} · {record.payee_name||"No payee"} · {record.reference||"No reference"}</span>{record.kind==="expense"&&<small>{record.due_on?`Due ${new Date(record.due_on+"T12:00:00").toLocaleDateString("en-ZA")}`:"No due date"}{record.payment_method?` · ${record.payment_method.replace("_"," ")}`:""}{record.tax_amount?` · VAT captured ${money(record.tax_amount)}`:""}</small>}{overdue&&<small className="finance-record-status unpaid">Overdue · requires payment review</small>}</div><div className="finance-record-value"><strong>{money(record.amount)}</strong><small className={"finance-record-status "+record.status}>{record.status}</small></div>{record.kind==="expense"&&record.status==="unpaid"&&<button type="button" className="network-secondary-button" onClick={()=>void markExpensePaid(record)}>Mark paid</button>}<button type="button" className="network-secondary-button" onClick={()=>void deleteRecord(record)}>Delete</button></article>})}</div>}
     </div>
   </section>;
 }
