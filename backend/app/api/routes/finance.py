@@ -53,6 +53,10 @@ def create_transaction(
 ):
     membership = current_membership(user, db)
     require_finance_admin(membership)
+    if payload.kind != "expense" and any((payload.payee_name, payload.due_on, payload.payment_method, payload.tax_amount)):
+        raise HTTPException(status_code=422, detail="Payee, due date, payment method and supplier VAT details are only valid for expenses.")
+    if payload.status == "unpaid" and payload.paid_on is not None:
+        raise HTTPException(status_code=422, detail="An unpaid record cannot have a paid date.")
     record = FinanceTransaction(
         business_id=membership.business_id,
         created_by_user_id=user.id,
