@@ -2,7 +2,8 @@ import csv
 import hashlib
 import io
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal, InvalidOperation
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, func
@@ -10,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.api.routes.auth import get_current_user
 from app.db import get_db
-from app.models import BankStatementImport, BankStatementTransaction, Membership, User
+from app.models import BankStatementImport, BankStatementTransaction, FinanceTransaction, Membership, POSTransaction, User
 
 router = APIRouter(prefix="/bank-reconciliation", tags=["bank reconciliation"])
 MAX_BYTES = 5 * 1024 * 1024
@@ -160,6 +161,142 @@ def bank_reconciliation_summary(user: User = Depends(get_current_user), db: Sess
     totals = {key: {"count": count, "net_amount": money(amount)} for key, count, amount in rows}
     return {"currency": "mixed", "statuses": totals,
             "note": "Bank statement balances are not VEXION cash balances. Transactions remain unmatched until a reviewer confirms their treatment."}
+
+
+
+def _candidate_payload(source_type: str, source_id: str, label: str, amount, source_date, bank_row, reference_match: bool):
+    return {
+        "source_type": source_type,
+        "source_id": source_id,
+        "label": label,
+        "amount": money(amount),
+        "source_date": source_date.isoformat(),
+        "reference_match": reference_match,
+        "match_basis": "Exact reference, amount and date window" if reference_match else "Exact amount and date window",
+    }
+
+
+def _suggestions_for_bank_row(record: BankStatementTransaction, membership: Membership, db: Session):
+    """Return exact-amount/date candidates only; never auto-match or infer a settlement."""
+    if record.currency != "ZAR":
+        return []
+    local_tz = ZoneInfo("Africa/Johannesburg")
+    start_date = record.transaction_date - timedelta(days=3)
+    end_date = record.transaction_date + timedelta(days=3)
+    bank_reference = (record.reference or "").strip().casefold()
+    candidates = []
+
+    finance_rows = db.scalars(select(FinanceTransaction).where(
+        FinanceTransaction.business_id == membership.business_id,
+        FinanceTransaction.currency == record.currency,
+        FinanceTransaction.status == "paid",
+        FinanceTransaction.amount == abs(record.amount),
+    )).all()
+    for item in finance_rows:
+        source_date = item.paid_on or item.occurred_on
+        if not start_date <= source_date <= end_date:
+            continue
+        expected_kind = "income" if record.amount > 0 else "expense"
+        if item.kind != expected_kind:
+            continue
+        if db.scalar(select(BankStatementTransaction.id).where(
+            BankStatementTransaction.business_id == membership.business_id,
+            BankStatementTransaction.matched_source_type == "finance",
+            BankStatementTransaction.matched_source_id == item.id,
+        )):
+            continue
+        ref_match = bool(bank_reference and item.reference and bank_reference == item.reference.strip().casefold())
+        candidates.append(_candidate_payload("finance", item.id, item.description, item.amount, source_date, record, ref_match))
+
+    pos_rows = db.scalars(select(POSTransaction).where(
+        POSTransaction.business_id == membership.business_id,
+        POSTransaction.currency == record.currency,
+        POSTransaction.net_amount == abs(record.amount),
+        POSTransaction.transaction_type == ("sale" if record.amount > 0 else "refund"),
+    )).all()
+    for item in pos_rows:
+        occurred_at = item.occurred_at
+        if occurred_at.tzinfo is None:
+            occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+        source_date = occurred_at.astimezone(local_tz).date()
+        if not start_date <= source_date <= end_date:
+            continue
+        if db.scalar(select(BankStatementTransaction.id).where(
+            BankStatementTransaction.business_id == membership.business_id,
+            BankStatementTransaction.matched_source_type == "pos",
+            BankStatementTransaction.matched_source_id == item.id,
+        )):
+            continue
+        ref_match = bool(bank_reference and item.external_transaction_id and bank_reference == item.external_transaction_id.strip().casefold())
+        label = f"POS {item.transaction_type} · {item.branch_name or 'Branch not supplied'} · {item.till_name or 'Till not supplied'}"
+        candidates.append(_candidate_payload("pos", item.id, label, item.net_amount, source_date, record, ref_match))
+
+    candidates.sort(key=lambda item: (not item["reference_match"], item["source_date"]))
+    return candidates[:20]
+
+
+@router.get("/transactions/{transaction_id}/suggestions")
+def bank_match_suggestions(
+    transaction_id: str,
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    membership = membership_for(user, db)
+    record = db.scalar(select(BankStatementTransaction).where(
+        BankStatementTransaction.id == transaction_id,
+        BankStatementTransaction.business_id == membership.business_id,
+    ))
+    if not record:
+        raise HTTPException(status_code=404, detail="Bank statement transaction not found.")
+    if record.reconciliation_status != "unmatched":
+        raise HTTPException(status_code=409, detail="Only unmatched bank transactions can request match suggestions.")
+    candidates = _suggestions_for_bank_row(record, membership, db)
+    return {
+        "bank_transaction_id": record.id,
+        "candidate_count": len(candidates),
+        "candidates": candidates,
+        "message": "Suggestions are exact-amount candidates within three calendar days. Review the source record before confirming; bank settlement is not inferred.",
+    }
+
+
+@router.post("/transactions/{transaction_id}/match")
+def confirm_bank_match(
+    transaction_id: str,
+    payload: dict,
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    membership = membership_for(user, db)
+    record = db.scalar(select(BankStatementTransaction).where(
+        BankStatementTransaction.id == transaction_id,
+        BankStatementTransaction.business_id == membership.business_id,
+    ))
+    if not record:
+        raise HTTPException(status_code=404, detail="Bank statement transaction not found.")
+    if record.reconciliation_status != "unmatched":
+        raise HTTPException(status_code=409, detail="This bank transaction has already been reviewed.")
+    source_type = payload.get("source_type")
+    source_id = str(payload.get("source_id") or "").strip()
+    if source_type not in {"finance", "pos"} or not source_id:
+        raise HTTPException(status_code=422, detail="Select a valid finance or POS source record.")
+    candidates = _suggestions_for_bank_row(record, membership, db)
+    selected = next((item for item in candidates if item["source_type"] == source_type and item["source_id"] == source_id), None)
+    if not selected:
+        raise HTTPException(status_code=422, detail="That record is not an eligible exact-amount/date candidate. Review it manually without linking.")
+    record.matched_source_type = source_type
+    record.matched_source_id = source_id
+    record.reconciliation_status = "matched"
+    record.review_note = f"Confirmed exact candidate: {selected['label']} ({source_type}:{source_id}). {selected['match_basis']}."
+    record.reviewed_by_user_id = user.id
+    record.reviewed_at = datetime.now(timezone.utc)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="That source record is already linked to another bank transaction.") from None
+    db.refresh(record)
+    return {"id": record.id, "reconciliation_status": record.reconciliation_status,
+            "matched_source_type": record.matched_source_type, "matched_source_id": record.matched_source_id,
+            "review_note": record.review_note,
+            "message": "Exact candidate link recorded. This is a reviewer-confirmed link, not independent proof of bank settlement."}
 
 
 @router.post("/transactions/{transaction_id}/review")
