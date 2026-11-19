@@ -14,6 +14,20 @@ def inventory_costing_summary(db, business_id: str, start_utc, end_utc, currency
         POSTransaction.occurred_at >= start_utc,
         POSTransaction.occurred_at < end_utc,
     )).all())
+    refund_count = db.scalar(select(POSTransaction.id).where(
+        POSTransaction.business_id == business_id,
+        POSTransaction.transaction_type == "refund",
+        POSTransaction.currency == currency,
+        POSTransaction.occurred_at >= start_utc,
+        POSTransaction.occurred_at < end_utc,
+    ).count()) if False else 0
+    refund_count = len(db.scalars(select(POSTransaction.id).where(
+        POSTransaction.business_id == business_id,
+        POSTransaction.transaction_type == "refund",
+        POSTransaction.currency == currency,
+        POSTransaction.occurred_at >= start_utc,
+        POSTransaction.occurred_at < end_utc,
+    )).all())
     transaction_ids = [row.id for row in transactions]
     lines = list(db.scalars(select(POSTransactionLine).where(
         POSTransactionLine.business_id == business_id,
@@ -64,7 +78,8 @@ def inventory_costing_summary(db, business_id: str, start_utc, end_utc, currency
     return {
         "sales_transaction_count": len(transactions), "sales_line_count": len(lines),
         "uncosted_line_count": uncosted_lines, "uncosted_quantity": uncosted_quantity,
-        "cogs": total_cogs, "complete": bool(transactions) and uncosted_lines == 0,
+        "cogs": total_cogs, "complete": bool(transactions) and uncosted_lines == 0 and refund_count == 0,
+        "refund_transaction_count": refund_count,
         "products": list(product_rows.values()),
     }
 
