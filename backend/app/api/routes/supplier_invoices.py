@@ -257,6 +257,9 @@ def create_supplier_invoice(payload: SupplierInvoiceCreate, db: Session = Depend
         raise HTTPException(status_code=422, detail="Supplier invoice matching currently supports ZAR only.")
     if any(line.purchase_order_line_id for line in payload.lines) and not po:
         raise HTTPException(status_code=422, detail="Select the purchase order before linking invoice lines.")
+    linked_po_lines = [line.purchase_order_line_id for line in payload.lines if line.purchase_order_line_id]
+    if len(linked_po_lines) != len(set(linked_po_lines)):
+        raise HTTPException(status_code=422, detail="Each purchase order line may be matched only once on a supplier invoice.")
     now = datetime.now(timezone.utc)
     invoice = SupplierInvoice(
         id=str(uuid.uuid4()), business_id=membership.business_id, supplier_id=supplier.id,
