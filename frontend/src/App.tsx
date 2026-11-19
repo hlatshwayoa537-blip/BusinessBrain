@@ -149,6 +149,8 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
   const [bankAccount, setBankAccount] = useState("Main business account");
   const [bankRows, setBankRows] = useState<any[]>([]);
   const [bankBusy, setBankBusy] = useState(false);
+  const [bankSuggestions, setBankSuggestions] = useState<Record<string, any[]>>({});
+  const [bankSuggestionBusy, setBankSuggestionBusy] = useState<string | null>(null);
   async function request(path: string, method = "GET", body?: unknown) {
     const response = await fetch(API_BASE + path, { method, headers: { Authorization: "Bearer " + session.access_token, ...(body ? {"Content-Type":"application/json"} : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     if (response.status === 204) return null;
@@ -182,13 +184,33 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
     finally { setBankBusy(false); }
   }
   async function reviewBankRow(row: any) {
-    const note = window.prompt("Explain what this bank transaction was matched to. Do not guess; leave it unmatched if not verified.");
+    const note = window.prompt("Explain what you independently verified. This records a reviewer note only; it does not link an accounting source record.");
     if (!note || note.trim().length < 3) return;
     try {
       await request("/bank-reconciliation/transactions/" + row.id + "/review", "POST", { status: "matched", note: note.trim() });
       setMessage("Bank transaction review saved.");
       await loadBankRows();
     } catch (err) { setError(err instanceof Error ? err.message : "Could not save bank review."); }
+  }
+  async function findBankMatches(row: any) {
+    setBankSuggestionBusy(row.id); setError("");
+    try {
+      const data = await request("/bank-reconciliation/transactions/" + row.id + "/suggestions");
+      setBankSuggestions(current => ({...current, [row.id]: data.candidates || []}));
+      if (!data.candidates?.length) setMessage("No exact amount/date candidates found. This bank row remains unmatched.");
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not find possible matches."); }
+    finally { setBankSuggestionBusy(null); }
+  }
+  async function confirmBankMatch(row: any, candidate: any) {
+    if (!window.confirm("Confirm this exact candidate link? Check the source record first. This does not independently prove bank settlement.")) return;
+    setBankSuggestionBusy(row.id); setError(""); setMessage("");
+    try {
+      await request("/bank-reconciliation/transactions/" + row.id + "/match", "POST", {source_type:candidate.source_type,source_id:candidate.source_id});
+      setMessage("Reviewer-confirmed source link saved.");
+      setBankSuggestions(current => {const next={...current};delete next[row.id];return next;});
+      await loadBankRows();
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not confirm this match."); }
+    finally { setBankSuggestionBusy(null); }
   }
   async function loadFinance() {
     setLoading(true); setError("");
@@ -230,8 +252,8 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
       <p>Upload a CSV exported from your bank. Required columns: <strong>date, description, amount</strong>. Optional: reference, transaction_id, balance, currency. Positive amounts are deposits; negative amounts are withdrawals. Imports are stored separately and never create or change POS sales, income or expenses.</p>
       <div className="finance-toolbar"><label>Bank account label<input value={bankAccount} maxLength={120} onChange={e=>setBankAccount(e.target.value)} placeholder="e.g. Main business account"/></label><label>CSV statement<input id="vexion-bank-csv" type="file" accept=".csv,text/csv" onChange={e=>setBankFile(e.target.files?.[0]??null)}/></label><button type="button" className="network-primary-button" disabled={!bankFile||bankBusy} onClick={()=>void importBankStatement()}>{bankBusy?"Importing…":"Import statement"}</button></div>
       <div className="recruitment-card-heading" style={{marginTop:18}}><div><span className="eyebrow">NEEDS REVIEW</span><h3>Unmatched bank transactions</h3></div><span className="module-count">{bankRows.length} ROWS</span></div>
-      {bankRows.length===0?<p className="network-empty">No unmatched bank statement transactions are currently recorded.</p>:<div className="finance-record-list">{bankRows.map(row=><article className="finance-record" key={row.id}><div className="finance-record-icon income">↔</div><div className="finance-record-info"><strong>{row.transaction_date} · {row.description}</strong><span>{row.reference||"No reference"} · Imported bank evidence · not yet reconciled</span></div><div className="finance-record-value"><strong>{money(row.amount)}</strong><button type="button" className="network-secondary-button" onClick={()=>void reviewBankRow(row)}>Record match</button></div></article>)}</div>}
-      <p className="finance-disclaimer">VEXION does not connect directly to your bank in this release. A reviewer must explain each match; marking a row as matched records a review note only and does not alter the accounting ledger or verify bank settlement.</p>
+      {bankRows.length===0?<p className="network-empty">No unmatched bank statement transactions are currently recorded.</p>:<div className="finance-record-list">{bankRows.map(row=><article className="finance-record" key={row.id}><div className="finance-record-icon income">↔</div><div className="finance-record-info"><strong>{row.transaction_date} · {row.description}</strong><span>{row.reference||"No reference"} · Imported bank evidence · not yet reconciled</span>{bankSuggestions[row.id] && <div className="finance-record-list" style={{marginTop:10}}>{bankSuggestions[row.id].length===0?<small>No exact amount/date candidates found. Keep this row unmatched until verified.</small>:bankSuggestions[row.id].map((candidate:any)=><div key={candidate.source_type+candidate.source_id} className="finance-record" style={{padding:"10px 0"}}><div className="finance-record-info"><strong>{candidate.label}</strong><span>{candidate.source_type.toUpperCase()} · {candidate.source_date} · {money(candidate.amount)} · {candidate.match_basis}</span></div><button type="button" className="network-secondary-button" disabled={bankSuggestionBusy===row.id} onClick={()=>void confirmBankMatch(row,candidate)}>Confirm link</button></div>)}</div>}</div><div className="finance-record-value"><strong>{money(row.amount)}</strong><button type="button" className="network-secondary-button" disabled={bankSuggestionBusy===row.id} onClick={()=>void findBankMatches(row)}>{bankSuggestionBusy===row.id?"Checking…":"Find matches"}</button><button type="button" className="network-secondary-button" onClick={()=>void reviewBankRow(row)}>Manual review</button></div></article>)}</div>}
+      <p className="finance-disclaimer">VEXION does not connect directly to your bank in this release. VEXION suggests only exact-amount candidates within three calendar days. A reviewer must confirm the source record. Links are auditable, but they do not independently prove bank settlement or alter POS and finance totals.</p>
     </section>
     {error && <p className="finance-alert" role="alert">{error}</p>}{message && <p className="finance-success" role="status">{message}</p>}
     <div className="finance-stats"><article><span>Total income</span><strong>{displayedMoney(summary?.income_total)}</strong><small>POS net sales + other paid income</small></article><article><span>POS sales</span><strong>{posDataAvailable ? money(summary?.pos_sales_total ?? 0) : "—"}</strong><small>{posDataAvailable ? `${summary?.pos_transaction_count ?? 0} POS sales/refunds · before refunds` : "No POS sales/refunds received for this year"}</small></article><article><span>POS refunds</span><strong>{posDataAvailable ? money(summary?.pos_refunds_total ?? 0) : "—"}</strong><small>{posDataAvailable ? "Deducted from POS income" : "No POS refund data received for this year"}</small></article><article><span>Expenses paid</span><strong>{displayedMoney(summary?.expense_total)}</strong><small>Paid expenses recorded</small></article><article><span>Net recorded result</span><strong className={Number(summary?.net_total ?? 0)>=0?"finance-positive":"finance-negative"}>{displayedMoney(summary?.net_total)}</strong><small>Income less paid expenses</small></article><article><span>Outstanding income</span><strong>{displayedMoney(summary?.outstanding_income)}</strong><small>Income marked unpaid</small></article></div>

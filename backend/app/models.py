@@ -1,6 +1,6 @@
 import uuid
 from datetime import date, datetime, timezone
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
 
@@ -543,7 +543,7 @@ class BankStatementImport(Base):
 
 class BankStatementTransaction(Base):
     __tablename__ = "bank_statement_transactions"
-    __table_args__ = (UniqueConstraint("business_id", "fingerprint", name="uq_bank_statement_business_fingerprint"),)
+    __table_args__ = (UniqueConstraint("business_id", "fingerprint", name="uq_bank_statement_business_fingerprint"), Index("uq_bank_statement_matched_source", "business_id", "matched_source_type", "matched_source_id", unique=True))
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
     import_id: Mapped[str] = mapped_column(ForeignKey("bank_statement_imports.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -559,4 +559,6 @@ class BankStatementTransaction(Base):
     review_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
     reviewed_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    matched_source_type: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    matched_source_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
