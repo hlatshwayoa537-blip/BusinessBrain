@@ -153,6 +153,10 @@ def test_bank_match_suggestions_can_link_exact_pos_sale(client):
         headers=headers, json={"source_type": "pos", "source_id": pos_candidates[0]["source_id"]},
     )
     assert confirmed.status_code == 200
+    shared_ledger = client.get(f"/api/v1/bank-reconciliation/transactions/{row['id']}/matches", headers=headers)
+    assert shared_ledger.status_code == 200
+    assert shared_ledger.json()["matched_source_count"] == 1
+    assert shared_ledger.json()["matches"][0]["source_id"] == pos_candidates[0]["source_id"]
     history = client.get("/api/v1/bank-reconciliation/transactions", headers=headers).json()
     assert history[0]["matched_source_type"] == "pos"
     assert history[0]["matched_source_id"] == pos_candidates[0]["source_id"]
