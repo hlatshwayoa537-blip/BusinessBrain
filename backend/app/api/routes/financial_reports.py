@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.routes.auth import get_current_user
 from app.db import get_db
 from app.models import FinanceTransaction, Invoice, Membership, POSTransaction, User
+from app.inventory_costing import inventory_costing_summary
 
 router = APIRouter(prefix="/financial-reports", tags=["financial reports"])
 TZ = ZoneInfo("Africa/Johannesburg")
@@ -79,15 +80,23 @@ def profit_loss(
         if row.kind == "expense" and row.status == "paid":
             expense_categories[row.category] += Decimal(row.amount)
     revenue = pos_sales - pos_refunds + manual_income
+    start_utc = datetime.combine(start_date, time.min, tzinfo=TZ).astimezone(timezone.utc)
+    end_utc = datetime.combine(end_date, time.min, tzinfo=TZ).astimezone(timezone.utc)
+    costing = inventory_costing_summary(db, membership.business_id, start_utc, end_utc)
+    cogs_complete = costing["complete"] and pos_refunds == ZERO
+    gross_profit = revenue - costing["cogs"] if cogs_complete else None
     return {
         "period": {"start": start_date.isoformat(), "end_exclusive": end_date.isoformat(), "timezone": "Africa/Johannesburg"},
         "currency": "ZAR",
         "revenue": {"pos_sales": money(pos_sales), "pos_refunds": money(pos_refunds), "manual_paid_income": money(manual_income), "total": money(revenue)},
         "expenses": {"manual_paid_expenses": money(manual_expenses), "by_category": [{"category": key, "amount": money(value)} for key, value in sorted(expense_categories.items())], "total": money(manual_expenses)},
-        "net_result": money(revenue - manual_expenses),
-        "not_included": {"unpaid_manual_income": money(outstanding_income), "unpaid_manual_expenses": money(unpaid_expenses), "inventory_cost_of_goods_sold": "not_available"},
+        "cost_of_goods_sold": money(costing["cogs"]) if cogs_complete else None,
+        "gross_profit": money(gross_profit) if gross_profit is not None else None,
+        "gross_profit_status": "complete" if cogs_complete else "incomplete",
+        "net_result": money((gross_profit if gross_profit is not None else revenue) - manual_expenses),
+        "not_included": {"unpaid_manual_income": money(outstanding_income), "unpaid_manual_expenses": money(unpaid_expenses), "inventory_cost_of_goods_sold": None if cogs_complete else "incomplete"},
         "source_counts": {"pos_transactions": len(pos), "manual_finance_records": len(manual)},
-        "data_quality": {"pos_feed_received": len(pos) > 0, "expenses_are_complete": False, "note": "Only recorded POS transactions and paid manual finance records are included. Supplier purchase orders are not treated as paid expenses or cost of goods sold."},
+        "data_quality": {"pos_feed_received": len(pos) > 0, "expenses_are_complete": False, "inventory_costing_complete": cogs_complete, "uncosted_pos_lines": costing["uncosted_line_count"], "note": "COGS is included only when every recorded POS sale line has a linked inventory item and receipt cost, and no POS refunds require cost reversal. Missing costs are never treated as zero. Supplier purchase orders are not treated as paid expenses."},
     }
 
 
