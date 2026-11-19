@@ -145,6 +145,10 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
   const [error, setError] = useState("");
   const [reports, setReports] = useState<{pnl:any;cash:any;vat:any}|null>(null);
   const [intelligence, setIntelligence] = useState<SalesForecastData|null>(null);
+  const [bankFile, setBankFile] = useState<File|null>(null);
+  const [bankAccount, setBankAccount] = useState("Main business account");
+  const [bankRows, setBankRows] = useState<any[]>([]);
+  const [bankBusy, setBankBusy] = useState(false);
   async function request(path: string, method = "GET", body?: unknown) {
     const response = await fetch(API_BASE + path, { method, headers: { Authorization: "Bearer " + session.access_token, ...(body ? {"Content-Type":"application/json"} : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     if (response.status === 204) return null;
@@ -156,7 +160,7 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
     setLoading(true); setError("");
     try {
       const [rows, totals, pnl, cash, vat, bi] = await Promise.all([request("/finance/transactions?year=" + year + (kindFilter === "all" ? "" : "&kind=" + kindFilter)), request("/finance/summary?year=" + year), request("/financial-reports/profit-loss?year=" + year), request("/financial-reports/cash-flow?year=" + year), request("/financial-reports/vat?year=" + year), request("/business-intelligence/sales-forecast")]);
-      setRecords(rows as FinanceRecord[]); setSummary(totals as FinanceSummary); setReports({pnl, cash, vat}); setIntelligence(bi as SalesForecastData);
+      setRecords(rows as FinanceRecord[]); setSummary(totals as FinanceSummary); setReports({pnl, cash, vat}); setIntelligence(bi as SalesForecastData); void loadBankRows();
     } catch (err) { setError(err instanceof Error ? err.message : "Could not load financial records."); }
     finally { setLoading(false); }
   }
@@ -186,7 +190,15 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
   const displayedMoney = (value: string | number | undefined) => summary ? money(value ?? 0) : "—";
   return <section className="finance-centre" id="finance">
     <div className="profile-centre-heading"><div><div className="eyebrow">FINANCIAL INTELLIGENCE</div><h2>Know where your business stands.</h2><p>POS sales and refunds flow into your financial picture automatically. Record operating expenses and other non-POS income here.</p></div><span className="profile-status">Private financial workspace</span></div>
-    <div className="finance-toolbar"><label>Reporting year<select value={year} onChange={e=>setYear(Number(e.target.value))}>{Array.from({length: Math.max(0, new Date().getFullYear() + 5 - 2000 + 1)}, (_, index) => new Date().getFullYear() + 5 - index).map(value=><option key={value} value={value}>{value}</option>)}</select></label><button type="button" className="network-secondary-button" onClick={()=>void loadFinance()}>Refresh records</button></div>
+    <div className="finance-toolbar"><label>Reporting year<select value={year} onChange={e=>setYear(Number(e.target.value))}>{Array.from({length: Math.max(0, new Date().getFullYear() + 5 - 2000 + 1)}, (_, index) => new Date().getFullYear() + 5 - index).map(value=><option key={value} value={value}>{value}</option>)}</select></label><button type="button" className="network-secondary-button" onClick={()=>{void loadFinance();void loadBankRows();}}>Refresh records</button></div>
+    <section className="finance-report" style={{marginBottom:24}}>
+      <div className="recruitment-card-heading"><div><span className="eyebrow">BANK RECONCILIATION</span><h3>Import a bank statement</h3></div><span className="profile-status">CSV · manual review</span></div>
+      <p>Upload a CSV exported from your bank. Required columns: <strong>date, description, amount</strong>. Optional: reference, transaction_id, balance, currency. Positive amounts are deposits; negative amounts are withdrawals. Imports are stored separately and never create or change POS sales, income or expenses.</p>
+      <div className="finance-toolbar"><label>Bank account label<input value={bankAccount} maxLength={120} onChange={e=>setBankAccount(e.target.value)} placeholder="e.g. Main business account"/></label><label>CSV statement<input id="vexion-bank-csv" type="file" accept=".csv,text/csv" onChange={e=>setBankFile(e.target.files?.[0]??null)}/></label><button type="button" className="network-primary-button" disabled={!bankFile||bankBusy} onClick={()=>void importBankStatement()}>{bankBusy?"Importing…":"Import statement"}</button></div>
+      <div className="recruitment-card-heading" style={{marginTop:18}}><div><span className="eyebrow">NEEDS REVIEW</span><h3>Unmatched bank transactions</h3></div><span className="module-count">{bankRows.length} ROWS</span></div>
+      {bankRows.length===0?<p className="network-empty">No unmatched bank statement transactions are currently recorded.</p>:<div className="finance-record-list">{bankRows.map(row=><article className="finance-record" key={row.id}><div className="finance-record-icon income">↔</div><div className="finance-record-info"><strong>{row.transaction_date} · {row.description}</strong><span>{row.reference||"No reference"} · Imported bank evidence · not yet reconciled</span></div><div className="finance-record-value"><strong>{money(row.amount)}</strong><button type="button" className="network-secondary-button" onClick={()=>void reviewBankRow(row)}>Record match</button></div></article>)}</div>}
+      <p className="finance-disclaimer">VEXION does not connect directly to your bank in this release. A reviewer must explain each match; marking a row as matched records a review note only and does not alter the accounting ledger or verify bank settlement.</p>
+    </section>
     {error && <p className="finance-alert" role="alert">{error}</p>}{message && <p className="finance-success" role="status">{message}</p>}
     <div className="finance-stats"><article><span>Total income</span><strong>{displayedMoney(summary?.income_total)}</strong><small>POS net sales + other paid income</small></article><article><span>POS sales</span><strong>{posDataAvailable ? money(summary?.pos_sales_total ?? 0) : "—"}</strong><small>{posDataAvailable ? `${summary?.pos_transaction_count ?? 0} POS sales/refunds · before refunds` : "No POS sales/refunds received for this year"}</small></article><article><span>POS refunds</span><strong>{posDataAvailable ? money(summary?.pos_refunds_total ?? 0) : "—"}</strong><small>{posDataAvailable ? "Deducted from POS income" : "No POS refund data received for this year"}</small></article><article><span>Expenses paid</span><strong>{displayedMoney(summary?.expense_total)}</strong><small>Paid expenses recorded</small></article><article><span>Net recorded result</span><strong className={Number(summary?.net_total ?? 0)>=0?"finance-positive":"finance-negative"}>{displayedMoney(summary?.net_total)}</strong><small>Income less paid expenses</small></article><article><span>Outstanding income</span><strong>{displayedMoney(summary?.outstanding_income)}</strong><small>Income marked unpaid</small></article></div>
     {reports && <div className="finance-stats">
