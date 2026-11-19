@@ -291,7 +291,7 @@ def confirm_bank_match(
         source_type=source_type,
         source_id=source_id,
         signed_amount=Decimal(str(record.amount)).quantize(Decimal("0.01")),
-        source_date=date.fromisoformat(selected["source_date"]),
+        source_date=datetime.fromisoformat(selected["source_date"]).date(),
         created_by_user_id=user.id,
     ))
     record.matched_source_type = source_type
