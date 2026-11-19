@@ -148,6 +148,7 @@ def list_bank_transactions(
              "reference": r.reference, "amount": money(r.amount), "currency": r.currency,
              "running_balance": money(r.running_balance) if r.running_balance is not None else None,
              "reconciliation_status": r.reconciliation_status, "review_note": r.review_note,
+             "matched_source_type": r.matched_source_type, "matched_source_id": r.matched_source_id,
              "import_id": r.import_id} for r in rows]
 
 
