@@ -400,3 +400,39 @@ def list_bank_transaction_matches(transaction_id: str, user: User = Depends(get_
     links = db.scalars(select(BankStatementMatchLink).where(BankStatementMatchLink.business_id == membership.business_id, BankStatementMatchLink.bank_transaction_id == record.id).order_by(BankStatementMatchLink.source_date, BankStatementMatchLink.created_at)).all()
     total = sum((Decimal(str(row.signed_amount)) for row in links), Decimal("0.00"))
     return {"bank_transaction_id": record.id, "reconciliation_status": record.reconciliation_status, "matched_source_count": len(links), "signed_total": f"{total:.2f}", "currency": record.currency, "matches": [{"source_type": row.source_type, "source_id": row.source_id, "signed_amount": f"{Decimal(str(row.signed_amount)):.2f}", "source_date": row.source_date.isoformat()} for row in links], "note": "Reviewer-confirmed POS source links; not independent processor settlement evidence."}
+
+
+@router.get("/transactions/{transaction_id}/batch-candidates")
+def list_pos_settlement_batch_candidates(transaction_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    membership = membership_for(user, db)
+    record = db.scalar(select(BankStatementTransaction).where(BankStatementTransaction.id == transaction_id, BankStatementTransaction.business_id == membership.business_id))
+    if not record:
+        raise HTTPException(status_code=404, detail="Bank statement transaction not found.")
+    if record.reconciliation_status != "unmatched":
+        raise HTTPException(status_code=409, detail="Only unmatched bank transactions can load batch candidates.")
+    if record.currency != "ZAR":
+        return {"bank_transaction_id": record.id, "candidates": [], "message": "Batch candidates currently support ZAR only."}
+    start_date, end_date = record.transaction_date - timedelta(days=3), record.transaction_date + timedelta(days=3)
+    local_tz = ZoneInfo("Africa/Johannesburg")
+    card_methods = {"card", "credit_card", "debit_card", "visa", "mastercard", "amex"}
+    rows = db.scalars(select(POSTransaction).where(
+        POSTransaction.business_id == membership.business_id,
+        POSTransaction.currency == record.currency,
+        POSTransaction.transaction_type.in_(["sale", "refund"]),
+    ).order_by(POSTransaction.occurred_at.desc()).limit(1000)).all()
+    candidates = []
+    for item in rows:
+        if str(item.payment_method or "").strip().casefold() not in card_methods:
+            continue
+        occurred_at = item.occurred_at if item.occurred_at.tzinfo else item.occurred_at.replace(tzinfo=timezone.utc)
+        source_date = occurred_at.astimezone(local_tz).date()
+        if not start_date <= source_date <= end_date:
+            continue
+        single = db.scalar(select(BankStatementTransaction.id).where(BankStatementTransaction.business_id == membership.business_id, BankStatementTransaction.matched_source_type == "pos", BankStatementTransaction.matched_source_id == item.id))
+        batch = db.scalar(select(BankStatementMatchLink.id).where(BankStatementMatchLink.business_id == membership.business_id, BankStatementMatchLink.source_type == "pos", BankStatementMatchLink.source_id == item.id))
+        if single or batch:
+            continue
+        amount = Decimal(str(item.net_amount)).quantize(Decimal("0.01"))
+        signed = amount if item.transaction_type == "sale" else -amount
+        candidates.append({"source_id": item.id, "transaction_type": item.transaction_type, "source_date": source_date.isoformat(), "branch": item.branch_name, "till": item.till_name, "payment_method": item.payment_method, "amount": f"{amount:.2f}", "signed_amount": f"{signed:.2f}", "currency": item.currency, "external_reference": item.external_transaction_id})
+    return {"bank_transaction_id": record.id, "bank_amount": f"{Decimal(str(record.amount)):.2f}", "currency": record.currency, "candidate_count": len(candidates), "candidates": candidates, "message": "Select source transactions whose signed total exactly equals the bank amount. Only same-business card sales/refunds within ±3 calendar days are shown."}
