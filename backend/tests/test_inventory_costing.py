@@ -159,3 +159,60 @@ def test_pos_refund_keeps_cogs_incomplete_until_return_cost_is_reversed(client):
     assert profitability.json()["refund_transaction_count"] == 1
     assert profitability.json()["cost_status"] == "incomplete"
     assert profitability.json()["cost_of_goods_sold"] is None
+
+
+def test_linked_restocked_refund_reverses_cogs_and_restores_stock(client):
+    owner = register(client, "cogs-returned@example.com", "Returned Goods Store")
+    auth_headers = headers(owner)
+    prepare_receipt(client, auth_headers, sku="RETURN-01")
+    sale = ingest_sale(client, auth_headers, "RETURN-01", "RETURN-SALE-1").json()
+    original_line = sale["items"][0]
+    connection = client.post("/api/v1/pos/connections", headers=auth_headers, json={
+        "provider_name": "Generic POS", "display_name": "Return till", "integration_method": "webhook"
+    }).json()
+    refund = client.post(f"/api/v1/pos/ingest/{connection['id']}", headers={
+        "X-Vexion-Secret": connection["webhook_secret"]
+    }, json={
+        "external_transaction_id": "RETURN-REFUND-1", "original_transaction_id": sale["id"],
+        "branch_name": "Main", "till_name": "Till 1", "transaction_type": "refund",
+        "occurred_at": "2026-11-18T11:00:00+02:00", "currency": "ZAR",
+        "gross_amount": "100.00", "discount_amount": "0.00", "tax_amount": "13.04",
+        "net_amount": "100.00", "payment_method": "card",
+        "items": [{"sku": "RETURN-01", "description": "Costed Product", "quantity": "1",
+                   "unit_price": "100.00", "original_line_id": original_line["id"], "restock": True}]
+    })
+    assert refund.status_code == 201
+
+    profitability = client.get(
+        "/api/v1/inventory/profitability?start_date=2026-11-01&end_date=2026-11-30",
+        headers=auth_headers,
+    ).json()
+    assert profitability["cost_status"] == "complete"
+    assert profitability["cost_of_goods_sold"] == "45.00"
+    assert profitability["refund_transaction_count"] == 1
+    assert profitability["products"][0]["quantity_returned"] == "1.000"
+
+    items = client.get("/api/v1/inventory/items", headers=auth_headers).json()
+    assert items[0]["stock_total"] == "9.000"
+
+
+def test_refund_cannot_exceed_original_sale_line_quantity(client):
+    owner = register(client, "cogs-return-limit@example.com", "Return Limit Store")
+    auth_headers = headers(owner)
+    prepare_receipt(client, auth_headers, sku="RETURN-LIMIT-01")
+    sale = ingest_sale(client, auth_headers, "RETURN-LIMIT-01", "RETURN-LIMIT-SALE").json()
+    original_line = sale["items"][0]
+    connection = client.post("/api/v1/pos/connections", headers=auth_headers, json={
+        "provider_name": "Generic POS", "display_name": "Return limit till", "integration_method": "webhook"
+    }).json()
+    response = client.post(f"/api/v1/pos/ingest/{connection['id']}", headers={
+        "X-Vexion-Secret": connection["webhook_secret"]
+    }, json={
+        "external_transaction_id": "RETURN-OVER-1", "original_transaction_id": sale["id"],
+        "branch_name": "Main", "transaction_type": "refund",
+        "occurred_at": "2026-11-18T11:00:00+02:00", "currency": "ZAR",
+        "gross_amount": "300.00", "discount_amount": "0.00", "tax_amount": "39.13",
+        "net_amount": "300.00", "items": [{"sku": "RETURN-LIMIT-01", "description": "Costed Product",
+        "quantity": "3", "unit_price": "100.00", "original_line_id": original_line["id"], "restock": True}]
+    })
+    assert response.status_code == 422
