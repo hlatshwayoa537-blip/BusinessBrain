@@ -151,6 +151,9 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
   const [bankBusy, setBankBusy] = useState(false);
   const [bankSuggestions, setBankSuggestions] = useState<Record<string, any[]>>({});
   const [bankSuggestionBusy, setBankSuggestionBusy] = useState<string | null>(null);
+  const [bankBatchCandidates, setBankBatchCandidates] = useState<Record<string, any[]>>({});
+  const [bankBatchSelections, setBankBatchSelections] = useState<Record<string, string[]>>({});
+  const [bankBatchBusy, setBankBatchBusy] = useState<string | null>(null);
   async function request(path: string, method = "GET", body?: unknown) {
     const response = await fetch(API_BASE + path, { method, headers: { Authorization: "Bearer " + session.access_token, ...(body ? {"Content-Type":"application/json"} : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     if (response.status === 204) return null;
@@ -212,6 +215,38 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
     } catch (err) { setError(err instanceof Error ? err.message : "Could not confirm this match."); }
     finally { setBankSuggestionBusy(null); }
   }
+  async function loadBatchCandidates(row: any) {
+    setBankBatchBusy(row.id); setError("");
+    try {
+      const data = await request("/bank-reconciliation/transactions/" + row.id + "/batch-candidates");
+      setBankBatchCandidates(current => ({...current, [row.id]: data.candidates || []}));
+      setBankBatchSelections(current => ({...current, [row.id]: []}));
+      if (!data.candidates?.length) setMessage("No eligible unlinked card POS transactions were found in the date window.");
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not load settlement batch candidates."); }
+    finally { setBankBatchBusy(null); }
+  }
+  function toggleBatchCandidate(rowId: string, sourceId: string) {
+    setBankBatchSelections(current => {
+      const selected = current[rowId] || [];
+      return {...current, [rowId]: selected.includes(sourceId) ? selected.filter(id => id !== sourceId) : [...selected, sourceId]};
+    });
+  }
+  async function confirmBatchMatch(row: any) {
+    const sourceIds = bankBatchSelections[row.id] || [];
+    const candidates = bankBatchCandidates[row.id] || [];
+    const total = candidates.filter(item => sourceIds.includes(item.source_id)).reduce((sum, item) => sum + Number(item.signed_amount), 0);
+    if (sourceIds.length < 2 || Math.abs(total - Number(row.amount)) > 0.001) { setError("Select at least two POS transactions whose signed total exactly equals the bank amount."); return; }
+    if (!window.confirm("Confirm " + sourceIds.length + " card POS transactions totalling " + total.toFixed(2) + "? This does not prove processor settlement or account for fees.")) return;
+    setBankBatchBusy(row.id); setError(""); setMessage("");
+    try {
+      await request("/bank-reconciliation/transactions/" + row.id + "/batch-match", "POST", {source_ids: sourceIds});
+      setMessage("Exact-total POS settlement batch linked and recorded.");
+      setBankBatchCandidates(current => {const next={...current};delete next[row.id];return next;});
+      setBankBatchSelections(current => {const next={...current};delete next[row.id];return next;});
+      await loadBankRows();
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not confirm settlement batch."); }
+    finally { setBankBatchBusy(null); }
+  }
   async function loadFinance() {
     setLoading(true); setError("");
     try {
@@ -252,8 +287,8 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
       <p>Upload a CSV exported from your bank. Required columns: <strong>date, description, amount</strong>. Optional: reference, transaction_id, balance, currency. Positive amounts are deposits; negative amounts are withdrawals. Imports are stored separately and never create or change POS sales, income or expenses.</p>
       <div className="finance-toolbar"><label>Bank account label<input value={bankAccount} maxLength={120} onChange={e=>setBankAccount(e.target.value)} placeholder="e.g. Main business account"/></label><label>CSV statement<input id="vexion-bank-csv" type="file" accept=".csv,text/csv" onChange={e=>setBankFile(e.target.files?.[0]??null)}/></label><button type="button" className="network-primary-button" disabled={!bankFile||bankBusy} onClick={()=>void importBankStatement()}>{bankBusy?"Importing…":"Import statement"}</button></div>
       <div className="recruitment-card-heading" style={{marginTop:18}}><div><span className="eyebrow">NEEDS REVIEW</span><h3>Unmatched bank transactions</h3></div><span className="module-count">{bankRows.length} ROWS</span></div>
-      {bankRows.length===0?<p className="network-empty">No unmatched bank statement transactions are currently recorded.</p>:<div className="finance-record-list">{bankRows.map(row=><article className="finance-record" key={row.id}><div className="finance-record-icon income">↔</div><div className="finance-record-info"><strong>{row.transaction_date} · {row.description}</strong><span>{row.reference||"No reference"} · Imported bank evidence · not yet reconciled</span>{bankSuggestions[row.id] && <div className="finance-record-list" style={{marginTop:10}}>{bankSuggestions[row.id].length===0?<small>No exact amount/date candidates found. Keep this row unmatched until verified.</small>:bankSuggestions[row.id].map((candidate:any)=><div key={candidate.source_type+candidate.source_id} className="finance-record" style={{padding:"10px 0"}}><div className="finance-record-info"><strong>{candidate.label}</strong><span>{candidate.source_type.toUpperCase()} · {candidate.source_date} · {money(candidate.amount)} · {candidate.match_basis}</span></div><button type="button" className="network-secondary-button" disabled={bankSuggestionBusy===row.id} onClick={()=>void confirmBankMatch(row,candidate)}>Confirm link</button></div>)}</div>}</div><div className="finance-record-value"><strong>{money(row.amount)}</strong><button type="button" className="network-secondary-button" disabled={bankSuggestionBusy===row.id} onClick={()=>void findBankMatches(row)}>{bankSuggestionBusy===row.id?"Checking…":"Find matches"}</button><button type="button" className="network-secondary-button" onClick={()=>void reviewBankRow(row)}>Manual review</button></div></article>)}</div>}
-      <p className="finance-disclaimer">VEXION does not connect directly to your bank in this release. VEXION suggests only exact-amount candidates within three calendar days. A reviewer must confirm the source record. Links are auditable, but they do not independently prove bank settlement or alter POS and finance totals.</p>
+      {bankRows.length===0?<p className="network-empty">No unmatched bank statement transactions are currently recorded.</p>:<div className="finance-record-list">{bankRows.map(row=><article className="finance-record" key={row.id}><div className="finance-record-icon income">↔</div><div className="finance-record-info"><strong>{row.transaction_date} · {row.description}</strong><span>{row.reference||"No reference"} · Imported bank evidence · not yet reconciled</span>{bankSuggestions[row.id] && <div className="finance-record-list" style={{marginTop:10}}>{bankSuggestions[row.id].length===0?<small>No exact amount/date candidates found. Keep this row unmatched until verified.</small>:bankSuggestions[row.id].map((candidate:any)=><div key={candidate.source_type+candidate.source_id} className="finance-record" style={{padding:"10px 0"}}><div className="finance-record-info"><strong>{candidate.label}</strong><span>{candidate.source_type.toUpperCase()} · {candidate.source_date} · {money(candidate.amount)} · {candidate.match_basis}</span></div><button type="button" className="network-secondary-button" disabled={bankSuggestionBusy===row.id} onClick={()=>void confirmBankMatch(row,candidate)}>Confirm link</button></div>)}</div>}{bankBatchCandidates[row.id] && <div className="finance-record-list" style={{marginTop:12}}><strong>Card POS settlement candidates</strong><small>Select at least two transactions. Sales add; refunds subtract. Bank amount: {money(row.amount)}.</small>{bankBatchCandidates[row.id].length===0?<small>No eligible unlinked card transactions found.</small>:bankBatchCandidates[row.id].map((item:any)=><label key={item.source_id} className="finance-record" style={{padding:"8px 0",display:"flex",gap:10,alignItems:"center"}}><input type="checkbox" checked={(bankBatchSelections[row.id]||[]).includes(item.source_id)} onChange={()=>toggleBatchCandidate(row.id,item.source_id)}/><span className="finance-record-info"><strong>{item.transaction_type.toUpperCase()} · {item.source_date} · {item.branch||"Branch not supplied"} / {item.till||"Till not supplied"}</strong><small>{item.payment_method} · {item.external_reference||"No POS reference"} · signed {money(item.signed_amount)}</small></span></label>)}<div className="finance-toolbar"><strong>Selected total: {money((bankBatchCandidates[row.id]||[]).filter((item:any)=>(bankBatchSelections[row.id]||[]).includes(item.source_id)).reduce((sum:number,item:any)=>sum+Number(item.signed_amount),0))}</strong><button type="button" className="network-primary-button" disabled={bankBatchBusy===row.id||(bankBatchSelections[row.id]||[]).length<2} onClick={()=>void confirmBatchMatch(row)}>{bankBatchBusy===row.id?"Linking…":"Confirm exact-total batch"}</button></div></div>}</div><div className="finance-record-value"><strong>{money(row.amount)}</strong><button type="button" className="network-secondary-button" disabled={bankSuggestionBusy===row.id} onClick={()=>void findBankMatches(row)}>{bankSuggestionBusy===row.id?"Checking…":"Find matches"}</button><button type="button" className="network-secondary-button" disabled={bankBatchBusy===row.id} onClick={()=>void loadBatchCandidates(row)}>{bankBatchBusy===row.id?"Loading…":"Build POS settlement batch"}</button><button type="button" className="network-secondary-button" onClick={()=>void reviewBankRow(row)}>Manual review</button></div></article>)}</div>}
+      <p className="finance-disclaimer">VEXION does not connect directly to your bank in this release. Exact one-to-one suggestions and reviewer-confirmed card POS batches are available. Batch totals must equal the bank amount exactly; fees and settlement timing are not inferred. Links are auditable but do not independently prove processor settlement or alter POS and finance totals.</p>
     </section>
     {error && <p className="finance-alert" role="alert">{error}</p>}{message && <p className="finance-success" role="status">{message}</p>}
     <div className="finance-stats"><article><span>Total income</span><strong>{displayedMoney(summary?.income_total)}</strong><small>POS net sales + other paid income</small></article><article><span>POS sales</span><strong>{posDataAvailable ? money(summary?.pos_sales_total ?? 0) : "—"}</strong><small>{posDataAvailable ? `${summary?.pos_transaction_count ?? 0} POS sales/refunds · before refunds` : "No POS sales/refunds received for this year"}</small></article><article><span>POS refunds</span><strong>{posDataAvailable ? money(summary?.pos_refunds_total ?? 0) : "—"}</strong><small>{posDataAvailable ? "Deducted from POS income" : "No POS refund data received for this year"}</small></article><article><span>Expenses paid</span><strong>{displayedMoney(summary?.expense_total)}</strong><small>Paid expenses recorded</small></article><article><span>Net recorded result</span><strong className={Number(summary?.net_total ?? 0)>=0?"finance-positive":"finance-negative"}>{displayedMoney(summary?.net_total)}</strong><small>Income less paid expenses</small></article><article><span>Outstanding income</span><strong>{displayedMoney(summary?.outstanding_income)}</strong><small>Income marked unpaid</small></article></div>
