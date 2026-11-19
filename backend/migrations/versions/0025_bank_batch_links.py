@@ -1,6 +1,7 @@
 """Add many-to-one bank settlement batch links."""
 from alembic import op
 import sqlalchemy as sa
+import uuid
 
 revision = "0025_bank_batch_links"
 down_revision = "0024_bank_match_links"
@@ -26,6 +27,33 @@ def upgrade() -> None:
     op.create_index("ix_bank_statement_match_links_business_id", "bank_statement_match_links", ["business_id"])
     op.create_index("ix_bank_statement_match_links_bank_transaction_id", "bank_statement_match_links", ["bank_transaction_id"])
     op.create_index("ix_bank_batch_transaction", "bank_statement_match_links", ["business_id", "bank_transaction_id"])
+
+    # Preserve previously confirmed one-to-one links in the shared uniqueness ledger.
+    connection = op.get_bind()
+    legacy_rows = connection.execute(sa.text("""
+        SELECT id, business_id, matched_source_type, matched_source_id,
+               amount, transaction_date, reviewed_by_user_id
+        FROM bank_statement_transactions
+        WHERE reconciliation_status = 'matched'
+          AND matched_source_type IS NOT NULL
+          AND matched_source_id IS NOT NULL
+          AND reviewed_by_user_id IS NOT NULL
+    """)).mappings().all()
+    for row in legacy_rows:
+        connection.execute(sa.text("""
+            INSERT INTO bank_statement_match_links
+                (id, business_id, bank_transaction_id, source_type, source_id,
+                 signed_amount, source_date, created_by_user_id, created_at)
+            VALUES
+                (:id, :business_id, :bank_transaction_id, :source_type, :source_id,
+                 :signed_amount, :source_date, :created_by_user_id, CURRENT_TIMESTAMP)
+            ON CONFLICT (business_id, source_type, source_id) DO NOTHING
+        """), {
+            "id": str(uuid.uuid4()), "business_id": row["business_id"],
+            "bank_transaction_id": row["id"], "source_type": row["matched_source_type"],
+            "source_id": row["matched_source_id"], "signed_amount": row["amount"],
+            "source_date": row["transaction_date"], "created_by_user_id": row["reviewed_by_user_id"],
+        })
 
 
 def downgrade() -> None:
