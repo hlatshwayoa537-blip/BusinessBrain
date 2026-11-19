@@ -15,6 +15,7 @@ from app.api.routes.recruitment import router as recruitment_router
 from app.api.routes.staff import router as staff_router
 from app.api.routes.finance import router as finance_router
 from app.api.routes.financial_reports import router as financial_reports_router
+from app.api.routes.business_intelligence import router as business_intelligence_router
 from app.api.routes.pos import router as pos_router
 from app.api.routes.invoices import router as invoices_router
 from app.api.routes.daily_closes import router as daily_closes_router
@@ -63,6 +64,7 @@ app.include_router(recruitment_router, prefix=settings.api_v1_prefix)
 app.include_router(staff_router, prefix=settings.api_v1_prefix)
 app.include_router(finance_router, prefix=settings.api_v1_prefix)
 app.include_router(financial_reports_router, prefix=settings.api_v1_prefix)
+app.include_router(business_intelligence_router, prefix=settings.api_v1_prefix)
 app.include_router(pos_router, prefix=settings.api_v1_prefix)
 app.include_router(invoices_router, prefix=settings.api_v1_prefix)
 app.include_router(daily_closes_router, prefix=settings.api_v1_prefix)
