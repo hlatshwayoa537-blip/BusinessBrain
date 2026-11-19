@@ -67,3 +67,52 @@ def inventory_costing_summary(db, business_id: str, start_utc, end_utc, currency
         "cogs": total_cogs, "complete": bool(transactions) and uncosted_lines == 0,
         "products": list(product_rows.values()),
     }
+
+
+def current_weighted_average_cost(db, business_id: str, inventory_item_id: str):
+    """Return a moving-average cost only while all on-hand stock has known cost."""
+    movements = list(db.scalars(select(InventoryMovement).where(
+        InventoryMovement.business_id == business_id,
+        InventoryMovement.inventory_item_id == inventory_item_id,
+    ).order_by(InventoryMovement.created_at.asc(), InventoryMovement.id.asc())).all())
+    on_hand = ZERO
+    average_cost = None
+    unknown_stock = False
+    for movement in movements:
+        delta = Decimal(movement.quantity_delta)
+        if movement.movement_type == "purchase_receipt":
+            if movement.unit_cost is None:
+                on_hand += delta
+                if delta > ZERO:
+                    unknown_stock = True
+            elif delta > ZERO:
+                if on_hand <= ZERO:
+                    on_hand = delta
+                    average_cost = Decimal(movement.unit_cost)
+                    unknown_stock = False
+                elif unknown_stock or average_cost is None:
+                    on_hand += delta
+                    unknown_stock = True
+                else:
+                    new_quantity = on_hand + delta
+                    average_cost = ((on_hand * average_cost) + (delta * Decimal(movement.unit_cost))) / new_quantity
+                    on_hand = new_quantity
+        elif movement.movement_type == "pos_sale":
+            on_hand += delta
+            if movement.unit_cost is None:
+                unknown_stock = True
+        elif movement.movement_type in {"adjustment_in", "adjustment_out"}:
+            on_hand += delta
+            if delta > ZERO:
+                unknown_stock = True
+        else:
+            on_hand += delta
+            if delta > ZERO:
+                unknown_stock = True
+        if on_hand <= ZERO:
+            on_hand = ZERO
+            average_cost = None
+            unknown_stock = False
+    if on_hand <= ZERO or unknown_stock or average_cost is None:
+        return None
+    return average_cost
