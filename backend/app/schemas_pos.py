@@ -29,6 +29,8 @@ class POSIngestLine(BaseModel):
     description: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=240)]
     quantity: Decimal = Field(gt=0, max_digits=14, decimal_places=3)
     unit_price: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
+    original_line_id: str | None = Field(default=None, max_length=36)
+    restock: bool = False
 
 
 class POSIngestLineResponse(BaseModel):
@@ -45,6 +47,7 @@ class POSIngestLineResponse(BaseModel):
 
 class POSIngestTransaction(BaseModel):
     external_transaction_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=180)]
+    original_transaction_id: str | None = Field(default=None, max_length=36)
     branch_name: str | None = Field(default=None, max_length=160)
     till_name: str | None = Field(default=None, max_length=120)
     transaction_type: TransactionType

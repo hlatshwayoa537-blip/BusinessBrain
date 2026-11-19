@@ -262,17 +262,21 @@ def inventory_profitability(
     summary = inventory_costing_summary(db, membership.business_id, start_utc, end_utc)
     rows = []
     for item in summary["products"]:
-        cost_complete = item["uncosted_quantity"] == 0 and item["costed_quantity"] > 0 and summary["refund_transaction_count"] == 0
+        cost_complete = item["uncosted_quantity"] == 0 and (item["costed_quantity"] > 0 or item["quantity_returned"] > 0)
         cogs = item["cogs"]
         revenue = item["line_revenue"]
         rows.append({
             "inventory_item_id": item["inventory_item_id"], "sku": item["sku"],
             "description": item["description"], "quantity_sold": f"{item['quantity_sold']:.3f}",
+            "quantity_returned": f"{item['quantity_returned']:.3f}",
+            "net_quantity_sold": f"{(item['quantity_sold'] - item['quantity_returned']):.3f}",
             "line_revenue_before_transaction_discounts": f"{revenue:.2f}",
+            "refund_line_revenue": f"{item['refund_line_revenue']:.2f}",
+            "net_line_revenue_before_transaction_discounts": f"{(revenue - item['refund_line_revenue']):.2f}",
             "costed_quantity": f"{item['costed_quantity']:.3f}",
             "uncosted_quantity": f"{item['uncosted_quantity']:.3f}",
             "cost_of_goods_sold": f"{cogs:.2f}" if cost_complete else None,
-            "gross_profit_before_transaction_discounts": f"{revenue - cogs:.2f}" if cost_complete else None,
+            "gross_profit_before_transaction_discounts": f"{revenue - item['refund_line_revenue'] - cogs:.2f}" if cost_complete else None,
             "cost_status": "complete" if cost_complete else "incomplete",
         })
     return {
@@ -289,7 +293,7 @@ def inventory_profitability(
             "Costs use quantity-weighted purchase receipt prices recorded before the POS sale was ingested.",
             "Opening stock without a recorded purchase receipt has no assumed cost.",
             "Transaction-level discounts are not allocated across product lines.",
-            "Refunds and returned-stock restocking are not included in this cost calculation.",
+            "Refunds reverse COGS only when linked to the original sale line and restocked; unlinked or uncosted refunds keep coverage incomplete.",
             "Historical POS sales received before cost snapshots were introduced remain uncosted.",
         ],
     }
