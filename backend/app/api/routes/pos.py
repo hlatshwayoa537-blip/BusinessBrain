@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.routes.auth import get_current_user
 from app.db import get_db
 from app.models import InventoryItem, InventoryMovement, Membership, POSConnection, POSTransaction, POSTransactionLine, User
+from app.inventory_costing import current_weighted_average_cost
 from app.schemas_pos import POSConnectionCreate, POSConnectionCreated, POSConnectionResponse, POSIngestTransaction, POSTransactionResponse, POSSalesSummary
 
 router = APIRouter(prefix="/pos", tags=["POS integrations"])
@@ -134,17 +135,7 @@ def ingest_transaction(
         )
         db.add(line)
         if record.transaction_type == "sale" and inventory_item:
-            receipt_costs = db.execute(select(
-                InventoryMovement.quantity_delta, InventoryMovement.unit_cost,
-            ).where(
-                InventoryMovement.business_id == connection.business_id,
-                InventoryMovement.inventory_item_id == inventory_item.id,
-                InventoryMovement.movement_type == "purchase_receipt",
-                InventoryMovement.unit_cost.is_not(None),
-            )).all()
-            receipt_quantity = sum((Decimal(row[0]) for row in receipt_costs), Decimal("0"))
-            receipt_value = sum((Decimal(row[0]) * Decimal(row[1]) for row in receipt_costs), Decimal("0"))
-            weighted_unit_cost = (receipt_value / receipt_quantity) if receipt_quantity > 0 else None
+            weighted_unit_cost = current_weighted_average_cost(db, connection.business_id, inventory_item.id)
             db.add(InventoryMovement(
                 id=str(uuid.uuid4()), business_id=connection.business_id,
                 inventory_item_id=inventory_item.id, movement_type="pos_sale",
