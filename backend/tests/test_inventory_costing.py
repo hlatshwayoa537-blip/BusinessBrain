@@ -108,3 +108,22 @@ def test_missing_purchase_cost_is_never_reported_as_zero_cogs(client):
     assert pnl.json()["cost_of_goods_sold"] is None
     assert pnl.json()["gross_profit"] is None
     assert pnl.json()["net_result"] is None
+
+def test_unknown_opening_stock_prevents_false_cogs_even_after_receipts(client):
+    owner = register(client, "cogs-opening@example.com", "Opening Stock Store")
+    auth_headers = headers(owner)
+    prepare_receipt(client, auth_headers, sku="OPENING-01")
+    item = client.get("/api/v1/inventory/items", headers=auth_headers).json()[0]
+    adjustment = client.post(f"/api/v1/inventory/items/{item['id']}/adjustments", headers=auth_headers, json={
+        "quantity_delta": "5", "location": "Main", "reason": "Opening count with no valuation"
+    })
+    assert adjustment.status_code == 201
+    ingest_sale(client, auth_headers, "OPENING-01", "OPENING-UNCOSTED-SALE")
+
+    profitability = client.get(
+        "/api/v1/inventory/profitability?start_date=2026-11-01&end_date=2026-11-30",
+        headers=auth_headers,
+    )
+    assert profitability.status_code == 200
+    assert profitability.json()["cost_status"] == "incomplete"
+    assert profitability.json()["cost_of_goods_sold"] is None
