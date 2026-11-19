@@ -581,3 +581,56 @@ class BankStatementMatchLink(Base):
     source_date: Mapped[date] = mapped_column(Date, nullable=False)
     created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class SupplierInvoice(Base):
+    __tablename__ = "supplier_invoices"
+    __table_args__ = (
+        UniqueConstraint("business_id", "supplier_id", "normalized_reference", name="uq_supplier_invoice_reference"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    supplier_id: Mapped[str] = mapped_column(ForeignKey("suppliers.id", ondelete="RESTRICT"), nullable=False, index=True)
+    purchase_order_id: Mapped[str | None] = mapped_column(ForeignKey("purchase_orders.id", ondelete="SET NULL"), nullable=True, index=True)
+    supplier_reference: Mapped[str] = mapped_column(String(100), nullable=False)
+    normalized_reference: Mapped[str] = mapped_column(String(100), nullable=False)
+    invoice_date: Mapped[date] = mapped_column(Date, nullable=False)
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="ZAR")
+    subtotal: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    tax_total: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    total: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="needs_review", index=True)
+    match_results_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    approved_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class SupplierInvoiceLine(Base):
+    __tablename__ = "supplier_invoice_lines"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    invoice_id: Mapped[str] = mapped_column(ForeignKey("supplier_invoices.id", ondelete="CASCADE"), nullable=False, index=True)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    purchase_order_line_id: Mapped[str | None] = mapped_column(ForeignKey("purchase_order_lines.id", ondelete="SET NULL"), nullable=True, index=True)
+    description: Mapped[str] = mapped_column(String(240), nullable=False)
+    quantity: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False)
+    unit_price: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    tax_rate: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0)
+    line_subtotal: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    line_tax: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    line_total: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+
+
+class SupplierInvoiceEvent(Base):
+    __tablename__ = "supplier_invoice_events"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    invoice_id: Mapped[str] = mapped_column(ForeignKey("supplier_invoices.id", ondelete="CASCADE"), nullable=False, index=True)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    actor_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    details_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
