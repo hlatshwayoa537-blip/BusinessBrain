@@ -143,6 +143,24 @@ def current_weighted_average_cost(db, business_id: str, inventory_item_id: str, 
             on_hand += delta
             if movement.unit_cost is None:
                 unknown_stock = True
+        elif movement.movement_type == "pos_return_restock":
+            if delta > ZERO and movement.unit_cost is not None:
+                if on_hand <= ZERO:
+                    on_hand = delta
+                    average_cost = Decimal(movement.unit_cost)
+                    unknown_stock = False
+                elif unknown_stock or average_cost is None:
+                    on_hand += delta
+                    unknown_stock = True
+                else:
+                    new_quantity = on_hand + delta
+                    average_cost = ((on_hand * average_cost) + (delta * Decimal(movement.unit_cost))) / new_quantity
+                    on_hand = new_quantity
+            elif delta > ZERO:
+                on_hand += delta
+                unknown_stock = True
+        elif movement.movement_type == "pos_return_nonrestock":
+            pass
         elif movement.movement_type in {"adjustment_in", "adjustment_out"}:
             on_hand += delta
             if delta > ZERO:
