@@ -1190,7 +1190,6 @@ function SupplierPurchasingWorkspace({session}:{session:AuthData}) {
   </section>;
 }
 
-export default 
 type SupplierInvoiceRecord = {id:string;supplier_id:string;supplier_name:string;purchase_order_id:string|null;supplier_reference:string;invoice_date:string;due_date:string|null;currency:string;subtotal:string;tax_total:string;total:string;status:string;match_results:{flags:{code:string;severity:string;message:string}[];line_results:{description:string;flags:string[]}[];flag_count:number};events?:{event_type:string;created_at:string}[]};
 type SupplierInvoiceDraftLine = {description:string;purchase_order_line_id:string;quantity:string;unit_price:string;tax_rate:string};
 
@@ -1284,7 +1283,7 @@ function SupplierInvoiceMatchingWorkspace({session}:{session:AuthData}) {
   </section>;
 }
 
-function App() {
+export default function App() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
   const [session, setSession] = useState<AuthData | null>(readSession);
   const [mode, setMode] = useState<"register" | "login">("register");
