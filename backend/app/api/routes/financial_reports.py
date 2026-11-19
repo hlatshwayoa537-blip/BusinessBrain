@@ -85,7 +85,7 @@ def profit_loss(
     costing = inventory_costing_summary(db, membership.business_id, start_utc, end_utc)
     cogs_complete = costing["complete"] and pos_refunds == ZERO
     cogs_status = "complete" if cogs_complete else ("incomplete" if costing["sales_transaction_count"] or pos_refunds > ZERO else "not_available")
-    gross_profit = revenue - costing["cogs"] if cogs_complete else None
+    gross_profit = pos_sales - pos_refunds - costing["cogs"] if cogs_complete else None
     return {
         "period": {"start": start_date.isoformat(), "end_exclusive": end_date.isoformat(), "timezone": "Africa/Johannesburg"},
         "currency": "ZAR",
@@ -94,7 +94,7 @@ def profit_loss(
         "cost_of_goods_sold": money(costing["cogs"]) if cogs_complete else None,
         "gross_profit": money(gross_profit) if gross_profit is not None else None,
         "gross_profit_status": cogs_status,
-        "net_result": money(gross_profit - manual_expenses) if gross_profit is not None else None,
+        "net_result": money(gross_profit + manual_income - manual_expenses) if gross_profit is not None else None,
         "net_result_before_cogs": money(revenue - manual_expenses),
         "not_included": {"unpaid_manual_income": money(outstanding_income), "unpaid_manual_expenses": money(unpaid_expenses), "inventory_cost_of_goods_sold": None if cogs_complete else cogs_status},
         "source_counts": {"pos_transactions": len(pos), "manual_finance_records": len(manual)},
