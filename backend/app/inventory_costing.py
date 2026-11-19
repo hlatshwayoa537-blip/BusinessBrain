@@ -77,11 +77,12 @@ def inventory_costing_summary(db, business_id: str, start_utc, end_utc, currency
     }
 
 
-def current_weighted_average_cost(db, business_id: str, inventory_item_id: str, required_quantity: Decimal):
+def current_weighted_average_cost(db, business_id: str, inventory_item_id: str, location: str, required_quantity: Decimal):
     """Return a moving-average cost only while all on-hand stock has known cost."""
     movements = list(db.scalars(select(InventoryMovement).where(
         InventoryMovement.business_id == business_id,
         InventoryMovement.inventory_item_id == inventory_item_id,
+        InventoryMovement.location == location,
     ).order_by(InventoryMovement.created_at.asc(), InventoryMovement.id.asc())).all())
     on_hand = ZERO
     average_cost = None
