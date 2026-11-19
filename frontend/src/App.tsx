@@ -1190,7 +1190,101 @@ function SupplierPurchasingWorkspace({session}:{session:AuthData}) {
   </section>;
 }
 
-export default function App() {
+export default 
+type SupplierInvoiceRecord = {id:string;supplier_id:string;supplier_name:string;purchase_order_id:string|null;supplier_reference:string;invoice_date:string;due_date:string|null;currency:string;subtotal:string;tax_total:string;total:string;status:string;match_results:{flags:{code:string;severity:string;message:string}[];line_results:{description:string;flags:string[]}[];flag_count:number};events?:{event_type:string;created_at:string}[]};
+type SupplierInvoiceDraftLine = {description:string;purchase_order_line_id:string;quantity:string;unit_price:string;tax_rate:string};
+
+function SupplierInvoiceMatchingWorkspace({session}:{session:AuthData}) {
+  const [suppliers,setSuppliers]=useState<SupplierRecord[]>([]);
+  const [orders,setOrders]=useState<PurchaseOrderRecord[]>([]);
+  const [invoices,setInvoices]=useState<SupplierInvoiceRecord[]>([]);
+  const [supplierId,setSupplierId]=useState("");
+  const [orderId,setOrderId]=useState("");
+  const [reference,setReference]=useState("");
+  const [invoiceDate,setInvoiceDate]=useState(new Date().toISOString().slice(0,10));
+  const [dueDate,setDueDate]=useState("");
+  const [subtotal,setSubtotal]=useState("");
+  const [taxTotal,setTaxTotal]=useState("");
+  const [total,setTotal]=useState("");
+  const [notes,setNotes]=useState("");
+  const [lines,setLines]=useState<SupplierInvoiceDraftLine[]>([{description:"",purchase_order_line_id:"",quantity:"1",unit_price:"",tax_rate:"15"}]);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const [message,setMessage]=useState("");
+  async function request(path:string,method="GET",body?:unknown) {
+    const response=await fetch(API_BASE+path,{method,headers:{Authorization:"Bearer "+session.access_token,...(body?{"Content-Type":"application/json"}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    const data=await response.json().catch(()=>null);
+    if(!response.ok)throw new Error(data?.detail||"Supplier invoice request failed.");
+    return data;
+  }
+  async function refresh() {
+    try {
+      const [supplierRows,orderRows,invoiceRows]=await Promise.all([request("/procurement/suppliers?active_only=true"),request("/procurement/purchase-orders"),request("/supplier-invoices")]);
+      setSuppliers(supplierRows as SupplierRecord[]);setOrders(orderRows as PurchaseOrderRecord[]);setInvoices(invoiceRows as SupplierInvoiceRecord[]);
+    } catch(err){setError(err instanceof Error?err.message:"Could not load supplier invoices.");}
+  }
+  useEffect(()=>{void refresh();},[session.access_token]);
+  const selectedOrder=orders.find(o=>o.id===orderId);
+  function updateLine(index:number,key:keyof SupplierInvoiceDraftLine,value:string){setLines(current=>current.map((line,i)=>i===index?{...line,[key]:value}:line));}
+  async function createInvoice(event:FormEvent<HTMLFormElement>){
+    event.preventDefault();setBusy(true);setError("");setMessage("");
+    try{
+      const created=await request("/supplier-invoices","POST",{
+        supplier_id:supplierId,purchase_order_id:orderId||null,supplier_reference:reference,invoice_date:invoiceDate,due_date:dueDate||null,currency:"ZAR",
+        stated_subtotal:Number(subtotal),stated_tax_total:Number(taxTotal),stated_total:Number(total),notes:notes||null,
+        lines:lines.map(line=>({...line,purchase_order_line_id:line.purchase_order_line_id||null,quantity:Number(line.quantity),unit_price:Number(line.unit_price),tax_rate:Number(line.tax_rate)}))
+      }) as SupplierInvoiceRecord;
+      setMessage("Invoice "+created.supplier_reference+" captured. "+created.match_results.flag_count+" matching flag(s) require review.");
+      setReference("");setSubtotal("");setTaxTotal("");setTotal("");setNotes("");setLines([{description:"",purchase_order_line_id:"",quantity:"1",unit_price:"",tax_rate:"15"}]);await refresh();
+    }catch(err){setError(err instanceof Error?err.message:"Supplier invoice could not be saved.");}
+    finally{setBusy(false);}
+  }
+  async function approve(invoice:SupplierInvoiceRecord){
+    const reason=invoice.match_results.flag_count?window.prompt("This invoice has matching flags. Enter the documented manager override reason (at least 8 characters):"):"";
+    if(invoice.match_results.flag_count&&(!reason||reason.trim().length<8))return;
+    setError("");setMessage("");
+    try{await request("/supplier-invoices/"+invoice.id+"/approve","POST",{override_reason:reason||null});setMessage(invoice.supplier_reference+" approved. No payment or ledger posting was initiated.");await refresh();}
+    catch(err){setError(err instanceof Error?err.message:"Invoice approval failed.");}
+  }
+  const money=(value:string)=>"R "+Number(value).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});
+  return <section className="finance-centre" id="supplier-invoice-matching">
+    <div className="profile-centre-heading"><div><div className="eyebrow">SUPPLIER INVOICE CONTROL</div><h2>Check every supplier bill before approval.</h2><p>Compare billed quantities and prices with purchase orders and goods actually received.</p></div><span className="profile-status">Review & audit trail</span></div>
+    <p className="finance-alert">Capturing or approving a supplier invoice does not pay the supplier or automatically post an expense, VAT claim or inventory cost. Those actions remain separate.</p>
+    {error&&<p className="finance-alert" role="alert">{error}</p>}{message&&<p className="finance-success" role="status">{message}</p>}
+    <div className="finance-layout">
+      <form className="finance-form" onSubmit={createInvoice}>
+        <h3>Capture supplier invoice</h3>
+        <label>Supplier<select required value={supplierId} onChange={e=>{setSupplierId(e.target.value);setOrderId("");}}><option value="">Choose supplier</option>{suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+        <label>Purchase order (recommended)<select value={orderId} onChange={e=>{setOrderId(e.target.value);const po=orders.find(o=>o.id===e.target.value);if(po&&po.supplier_id!==supplierId)setSupplierId(po.supplier_id);}}><option value="">No purchase order</option>{orders.filter(o=>!supplierId||o.supplier_id===supplierId).map(o=><option key={o.id} value={o.id}>{o.reference} · {o.status}</option>)}</select></label>
+        <label>Supplier invoice reference<input required value={reference} onChange={e=>setReference(e.target.value)} placeholder="Supplier's invoice number"/></label>
+        <div className="finance-toolbar"><label>Invoice date<input type="date" required value={invoiceDate} onChange={e=>setInvoiceDate(e.target.value)}/></label><label>Due date<input type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></label></div>
+        <h4>Invoice lines</h4>
+        {lines.map((line,index)=><div className="purchase-line-draft" key={index}>
+          <label>Match purchase order line<select value={line.purchase_order_line_id} onChange={e=>{const poLine=selectedOrder?.lines.find(x=>x.id===e.target.value);setLines(current=>current.map((v,i)=>i===index?{...v,purchase_order_line_id:e.target.value,description:poLine?.description||v.description,unit_price:poLine?.unit_price||v.unit_price,tax_rate:poLine?.tax_rate||v.tax_rate}:v));}}><option value="">Unmatched / no PO line</option>{selectedOrder?.lines.map(x=><option key={x.id} value={x.id}>{x.description} · received {x.quantity_received}/{x.quantity_ordered}</option>)}</select></label>
+          <label>Description<input required value={line.description} onChange={e=>updateLine(index,"description",e.target.value)} placeholder="Invoice line description"/></label>
+          <div className="finance-toolbar"><label>Qty billed<input type="number" min="0.001" step="0.001" required value={line.quantity} onChange={e=>updateLine(index,"quantity",e.target.value)}/></label><label>Unit price (R)<input type="number" min="0" step="0.01" required value={line.unit_price} onChange={e=>updateLine(index,"unit_price",e.target.value)}/></label><label>VAT %<input type="number" min="0" max="100" step="0.01" value={line.tax_rate} onChange={e=>updateLine(index,"tax_rate",e.target.value)}/></label></div>
+          {lines.length>1&&<button type="button" className="network-secondary-button" onClick={()=>setLines(current=>current.filter((_,i)=>i!==index))}>Remove line</button>}
+        </div>)}
+        <button type="button" className="network-secondary-button" onClick={()=>setLines(current=>[...current,{description:"",purchase_order_line_id:"",quantity:"1",unit_price:"",tax_rate:"15"}])}>Add invoice line</button>
+        <h4>Amounts as printed on supplier invoice</h4>
+        <div className="finance-toolbar"><label>Subtotal (R)<input type="number" min="0" step="0.01" required value={subtotal} onChange={e=>setSubtotal(e.target.value)}/></label><label>VAT total (R)<input type="number" min="0" step="0.01" required value={taxTotal} onChange={e=>setTaxTotal(e.target.value)}/></label><label>Total (R)<input type="number" min="0" step="0.01" required value={total} onChange={e=>setTotal(e.target.value)}/></label></div>
+        <label>Internal notes<textarea rows={2} value={notes} onChange={e=>setNotes(e.target.value)}/></label>
+        <button className="network-primary-button" disabled={busy||!supplierId||!reference.trim()||lines.some(x=>!x.description.trim()||!x.unit_price)}>{busy?"Saving…":"Capture & match invoice"}</button>
+      </form>
+      <div className="finance-form">
+        <div className="profile-centre-heading"><div><h3>Invoice review queue</h3><p>{invoices.filter(x=>x.status==="needs_review").length} awaiting approval · {invoices.length} total</p></div><button type="button" className="network-secondary-button" onClick={()=>void refresh()}>Refresh</button></div>
+        {invoices.length===0?<p className="network-empty">No supplier invoices recorded yet.</p>:invoices.map(invoice=><article className="purchase-order-card" key={invoice.id}>
+          <div className="profile-centre-heading"><div><strong>{invoice.supplier_name} · {invoice.supplier_reference}</strong><p>{invoice.invoice_date} · {money(invoice.total)}</p></div><span className="profile-status">{invoice.status.replaceAll("_"," ")}</span></div>
+          <p>{invoice.match_results.flag_count===0?"No matching differences detected.":invoice.match_results.flag_count+" matching flag(s) need review."}</p>
+          {invoice.match_results.flags?.map((flag,index)=><p className="finance-alert" key={index}><strong>{flag.code.replaceAll("_"," ")}</strong> · {flag.message}</p>)}
+          {invoice.status==="needs_review"&&<button type="button" className="network-primary-button" onClick={()=>void approve(invoice)}>Review & approve</button>}
+        </article>)}
+      </div>
+    </div>
+  </section>;
+}
+
+function App() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
   const [session, setSession] = useState<AuthData | null>(readSession);
   const [mode, setMode] = useState<"register" | "login">("register");
@@ -1646,6 +1740,7 @@ export default function App() {
       <InvoiceWorkspace session={session} />
       <InventoryWorkspace session={session} />
       <SupplierPurchasingWorkspace session={session} />
+      <SupplierInvoiceMatchingWorkspace session={session} />
       <FinanceWorkspace session={session} />
       <section className="profile-centre" id="business-profile">
         <div className="profile-centre-heading"><div><div className="eyebrow">BUSINESS IDENTITY</div><h2>Business Profile & Onboarding</h2><p>Complete your business details. You control what information is shared publicly later.</p></div><span className="profile-status">Editable anytime</span></div>
