@@ -135,7 +135,7 @@ def ingest_transaction(
         )
         db.add(line)
         if record.transaction_type == "sale" and inventory_item:
-            weighted_unit_cost = current_weighted_average_cost(db, connection.business_id, inventory_item.id, item.quantity)
+            weighted_unit_cost = current_weighted_average_cost(db, connection.business_id, inventory_item.id, stock_location, item.quantity)
             db.add(InventoryMovement(
                 id=str(uuid.uuid4()), business_id=connection.business_id,
                 inventory_item_id=inventory_item.id, movement_type="pos_sale",
