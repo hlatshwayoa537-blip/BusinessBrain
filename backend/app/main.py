@@ -25,6 +25,7 @@ from app.api.routes.procurement import router as procurement_router
 from app.api.routes.inventory import router as inventory_router
 from app.api.routes.referrals import router as referrals_router
 from app.api.routes.billing import router as billing_router
+from app.api.routes.bank_reconciliation import router as bank_reconciliation_router
 from app.core.config import settings
 
 
@@ -74,6 +75,7 @@ app.include_router(procurement_router, prefix=settings.api_v1_prefix)
 app.include_router(inventory_router, prefix=settings.api_v1_prefix)
 app.include_router(referrals_router, prefix=settings.api_v1_prefix)
 app.include_router(billing_router, prefix=settings.api_v1_prefix)
+app.include_router(bank_reconciliation_router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/", tags=["system"])
