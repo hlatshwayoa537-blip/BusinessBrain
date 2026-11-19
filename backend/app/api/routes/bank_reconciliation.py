@@ -204,6 +204,10 @@ def _suggestions_for_bank_row(record: BankStatementTransaction, membership: Memb
             BankStatementTransaction.business_id == membership.business_id,
             BankStatementTransaction.matched_source_type == "finance",
             BankStatementTransaction.matched_source_id == item.id,
+        )) or db.scalar(select(BankStatementMatchLink.id).where(
+            BankStatementMatchLink.business_id == membership.business_id,
+            BankStatementMatchLink.source_type == "finance",
+            BankStatementMatchLink.source_id == item.id,
         )):
             continue
         ref_match = bool(bank_reference and item.reference and bank_reference == item.reference.strip().casefold())
@@ -226,6 +230,10 @@ def _suggestions_for_bank_row(record: BankStatementTransaction, membership: Memb
             BankStatementTransaction.business_id == membership.business_id,
             BankStatementTransaction.matched_source_type == "pos",
             BankStatementTransaction.matched_source_id == item.id,
+        )) or db.scalar(select(BankStatementMatchLink.id).where(
+            BankStatementMatchLink.business_id == membership.business_id,
+            BankStatementMatchLink.source_type == "pos",
+            BankStatementMatchLink.source_id == item.id,
         )):
             continue
         ref_match = bool(bank_reference and item.external_transaction_id and bank_reference == item.external_transaction_id.strip().casefold())
