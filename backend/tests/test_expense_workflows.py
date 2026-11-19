@@ -1,5 +1,3 @@
-from app.tests.conftest import *  # noqa: F401,F403
-
 def register(client, email):
     response = client.post("/api/v1/auth/register", json={
         "full_name": "Expense Owner",
