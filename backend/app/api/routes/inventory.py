@@ -262,7 +262,7 @@ def inventory_profitability(
     summary = inventory_costing_summary(db, membership.business_id, start_utc, end_utc)
     rows = []
     for item in summary["products"]:
-        cost_complete = item["uncosted_quantity"] == 0 and item["costed_quantity"] > 0
+        cost_complete = item["uncosted_quantity"] == 0 and item["costed_quantity"] > 0 and summary["refund_transaction_count"] == 0
         cogs = item["cogs"]
         revenue = item["line_revenue"]
         rows.append({
@@ -279,6 +279,7 @@ def inventory_profitability(
         "period": {"start": start_date.isoformat(), "end_inclusive": end_date.isoformat(), "timezone": "Africa/Johannesburg"},
         "currency": "ZAR", "sales_transaction_count": summary["sales_transaction_count"],
         "sales_line_count": summary["sales_line_count"],
+        "refund_transaction_count": summary["refund_transaction_count"],
         "uncosted_line_count": summary["uncosted_line_count"],
         "uncosted_quantity": f"{summary['uncosted_quantity']:.3f}",
         "cost_of_goods_sold": f"{summary['cogs']:.2f}" if summary["complete"] else None,
