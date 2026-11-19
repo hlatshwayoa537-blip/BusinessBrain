@@ -13,7 +13,7 @@ from app.api.routes.auth import get_current_user
 from app.db import get_db
 from app.models import (
     Membership, PurchaseOrder, PurchaseOrderLine, Supplier, SupplierInvoice,
-    SupplierInvoiceEvent, SupplierInvoiceLine, SupplierInvoiceEvent, User,
+    SupplierInvoiceEvent, SupplierInvoiceLine, User,
 )
 
 router = APIRouter(prefix="/supplier-invoices", tags=["supplier invoice matching"])
