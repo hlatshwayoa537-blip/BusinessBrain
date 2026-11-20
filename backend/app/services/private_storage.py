@@ -10,6 +10,18 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 
+MAX_EVIDENCE_BYTES = 25 * 1024 * 1024
+MAX_ARCHIVE_ENTRIES = 10_000
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+MAX_ARCHIVE_COMPRESSION_RATIO = 100
+OOXML_REQUIRED_PARTS = {
+    ".docx": ("word/document.xml", b"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"),
+    ".xlsx": ("xl/workbook.xml", b"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"),
+    ".pptx": ("ppt/presentation.xml", b"application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"),
+}
+OOXML_MACRO_PARTS = {"word/vbaProject.bin", "xl/vbaProject.bin", "ppt/vbaProject.bin"}
+
+
 @lru_cache(maxsize=1)
 def s3_client():
     if not all([settings.s3_bucket, settings.s3_access_key_id, settings.s3_secret_access_key]):
@@ -23,6 +35,7 @@ def s3_client():
         config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
     )
 
+
 def presigned_upload(key: str, content_type: str, max_bytes: int) -> dict:
     return s3_client().generate_presigned_post(
         Bucket=settings.s3_bucket,
@@ -32,11 +45,65 @@ def presigned_upload(key: str, content_type: str, max_bytes: int) -> dict:
         ExpiresIn=settings.s3_upload_url_expire_seconds,
     )
 
+
 def object_head(key: str):
     return s3_client().head_object(Bucket=settings.s3_bucket, Key=key)
 
+
+def _valid_ooxml(data: bytes, extension: str) -> bool:
+    required_part, required_content_type = OOXML_REQUIRED_PARTS[extension]
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            infos = archive.infolist()
+            if not infos or len(infos) > MAX_ARCHIVE_ENTRIES:
+                return False
+            if any(info.flag_bits & 0x1 for info in infos):
+                return False
+            if any(info.filename in OOXML_MACRO_PARTS for info in infos):
+                return False
+            names = {info.filename for info in infos}
+            if "[Content_Types].xml" not in names or required_part not in names:
+                return False
+            total_uncompressed = sum(info.file_size for info in infos)
+            if total_uncompressed > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                return False
+            for info in infos:
+                if info.file_size and (
+                    info.compress_size == 0
+                    or info.file_size / info.compress_size > MAX_ARCHIVE_COMPRESSION_RATIO
+                ):
+                    return False
+            content_types = archive.read("[Content_Types].xml")
+            # Require the correct OOXML main-part content type, not just a ZIP
+            # containing a conveniently named XML file.
+            return required_content_type in content_types
+    except (zipfile.BadZipFile, OSError, KeyError, RuntimeError, ValueError):
+        return False
+
+
+def _matches_file_signature(data: bytes, extension: str) -> bool:
+    if extension == ".pdf":
+        return data[:1024].find(b"%PDF-") >= 0 and b"%%EOF" in data[-1024:]
+    if extension == ".png":
+        if len(data) < 24 or not data.startswith(bytes.fromhex("89504e470d0a1a0a")):
+            return False
+        width = int.from_bytes(data[16:20], "big")
+        height = int.from_bytes(data[20:24], "big")
+        return 0 < width <= 50_000 and 0 < height <= 50_000 and width * height <= 100_000_000
+    if extension in {".jpg", ".jpeg"}:
+        return len(data) >= 4 and data.startswith(bytes.fromhex("ffd8ff")) and data.endswith(bytes.fromhex("ffd9"))
+    if extension in {".txt", ".csv"}:
+        try:
+            return b"\x00" not in data and bool(data.decode("utf-8-sig"))
+        except UnicodeDecodeError:
+            return False
+    if extension in OOXML_REQUIRED_PARTS:
+        return _valid_ooxml(data, extension)
+    return False
+
+
 def validate_object_content(key: str, extension: str) -> None:
-    """Verify file bytes match the permitted format before malware scanning."""
+    """Bound and inspect the actual uploaded bytes before malware scanning."""
     response = s3_client().get_object(Bucket=settings.s3_bucket, Key=key)
     try:
         body = response["Body"]
@@ -47,41 +114,16 @@ def validate_object_content(key: str, extension: str) -> None:
             if not chunk:
                 break
             total += len(chunk)
-            if total > 25 * 1024 * 1024:
+            if total > MAX_EVIDENCE_BYTES:
                 raise HTTPException(status_code=413, detail="Evidence file exceeds the 25 MB limit.")
             chunks.append(chunk)
         data = b"".join(chunks)
     finally:
         response["Body"].close()
 
-    valid = False
-    if extension == ".pdf":
-        valid = data.startswith(b"%PDF-")
-    elif extension == ".png":
-        valid = data.startswith(b"\\x89PNG\\r\\n\\x1a\\n")
-    elif extension in {".jpg", ".jpeg"}:
-        valid = data.startswith(b"\\xff\\xd8\\xff")
-    elif extension in {".txt", ".csv"}:
-        try:
-            data.decode("utf-8-sig")
-            valid = b"\\x00" not in data
-        except UnicodeDecodeError:
-            valid = False
-    elif extension in {".docx", ".xlsx", ".pptx"}:
-        required = {
-            ".docx": "word/document.xml",
-            ".xlsx": "xl/workbook.xml",
-            ".pptx": "ppt/presentation.xml",
-        }[extension]
-        try:
-            with zipfile.ZipFile(io.BytesIO(data)) as archive:
-                names = set(archive.namelist())
-                valid = "[Content_Types].xml" in names and required in names
-        except (zipfile.BadZipFile, OSError):
-            valid = False
+    if not _matches_file_signature(data, extension):
+        raise HTTPException(status_code=422, detail="File contents do not match the selected file type or are incomplete.")
 
-    if not valid:
-        raise HTTPException(status_code=422, detail="File contents do not match the selected file type.")
 
 def scan_object_with_clamav(key: str) -> None:
     if not settings.clamav_host:
@@ -106,10 +148,12 @@ def scan_object_with_clamav(key: str) -> None:
     if not result.endswith("OK"):
         raise HTTPException(status_code=422, detail="The uploaded file failed the malware scan and cannot be shared.")
 
+
 def promote_clean_object(source_key: str, destination_key: str) -> None:
     client = s3_client()
     client.copy_object(Bucket=settings.s3_bucket, Key=destination_key, CopySource={"Bucket": settings.s3_bucket, "Key": source_key}, MetadataDirective="COPY")
     client.delete_object(Bucket=settings.s3_bucket, Key=source_key)
+
 
 def presigned_download(key: str, filename: str, content_type: str) -> str:
     return s3_client().generate_presigned_url(
@@ -117,6 +161,7 @@ def presigned_download(key: str, filename: str, content_type: str) -> str:
         Params={"Bucket": settings.s3_bucket, "Key": key, "ResponseContentDisposition": f'attachment; filename="{filename}"', "ResponseContentType": content_type},
         ExpiresIn=settings.s3_download_url_expire_seconds,
     )
+
 
 def delete_object(key: str) -> None:
     s3_client().delete_object(Bucket=settings.s3_bucket, Key=key)
