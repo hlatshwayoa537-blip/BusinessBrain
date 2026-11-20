@@ -394,52 +394,146 @@ async def receive_payfast_itn(request: Request, db: Session = Depends(get_db)) -
         raise HTTPException(status_code=403, detail="PayFast notification source is not allowed.")
     if not await _confirm_payfast_itn(raw_body, settings.payfast_sandbox):
         raise HTTPException(status_code=400, detail="PayFast could not validate this notification.")
-    payment_reference = data.get("m_payment_id", "")
-    payment = db.scalar(select(PayFastPayment).where(PayFastPayment.m_payment_id == payment_reference))
-    if not payment:
-        raise HTTPException(status_code=404, detail="Unknown PayFast payment reference.")
-    if payment.status == "verified":
-        if payment.pf_payment_id == data.get("pf_payment_id"):
+
+    payment_status = data.get("payment_status", "").strip().upper()
+    if payment_status not in {"COMPLETE", "CANCELLED"}:
+        raise HTTPException(status_code=400, detail="Unsupported PayFast payment status.")
+    provider_payment_id = data.get("pf_payment_id", "").strip()
+    if not provider_payment_id.isdigit() or int(provider_payment_id) <= 0:
+        raise HTTPException(status_code=400, detail="PayFast payment ID is missing or invalid.")
+    if not data.get("item_name", "").strip():
+        raise HTTPException(status_code=400, detail="PayFast item name is missing.")
+    subscription_token = data.get("token", "").strip()
+    if len(subscription_token) != 36:
+        raise HTTPException(status_code=400, detail="PayFast subscription token is missing or invalid.")
+
+    existing_charge = db.scalar(select(PayFastCharge).where(
+        PayFastCharge.pf_payment_id == provider_payment_id,
+    ))
+    if existing_charge:
+        return {"status": "accepted", "duplicate": True}
+
+    payment_reference = data.get("m_payment_id", "").strip()
+    payment = db.scalar(select(PayFastPayment).where(
+        PayFastPayment.m_payment_id == payment_reference,
+    )) if payment_reference else None
+
+    if payment:
+        subscription = db.scalar(select(BusinessSubscription).where(
+            BusinessSubscription.id == payment.subscription_id,
+            BusinessSubscription.business_id == payment.business_id,
+        ))
+        if not subscription:
+            raise HTTPException(status_code=409, detail="Subscription record is unavailable.")
+        if subscription.provider_subscription_reference and subscription.provider_subscription_reference != subscription_token:
+            raise HTTPException(status_code=409, detail="PayFast subscription token does not match this payment.")
+        if payment.status == "verified" and payment.pf_payment_id == provider_payment_id:
             return {"status": "accepted", "duplicate": True}
-        raise HTTPException(status_code=409, detail="Payment reference was already used.")
-    if data.get("payment_status") != "COMPLETE":
-        payment.status = "failed"
+    else:
+        subscription = db.scalar(select(BusinessSubscription).where(
+            BusinessSubscription.provider_subscription_reference == subscription_token,
+            BusinessSubscription.payment_provider == "payfast",
+        ))
+        if not subscription:
+            raise HTTPException(status_code=404, detail="Unknown PayFast subscription token.")
+
+    now = datetime.now(timezone.utc)
+    if payment_status == "CANCELLED":
+        if payment and payment.status in {"pending", "failed"}:
+            payment.status = "cancelled"
+            payment.provider_subscription_token = subscription_token
+        subscription.status = "cancelled"
+        subscription.payment_provider = "payfast"
+        subscription.provider_subscription_reference = subscription_token
+        referral = db.scalar(select(BusinessReferral).where(
+            BusinessReferral.referred_business_id == subscription.business_id,
+        ))
+        if referral and referral.status in {"pending_payment", "payment_verified"}:
+            referral.status = "cancelled"
+        db.add(PayFastCharge(
+            business_id=subscription.business_id,
+            subscription_id=subscription.id,
+            m_payment_id=payment_reference or None,
+            pf_payment_id=provider_payment_id,
+            provider_subscription_token=subscription_token,
+            payment_status="CANCELLED",
+            amount=None,
+            currency="ZAR",
+            received_at=now,
+            verified_at=now,
+        ))
+        subscription.updated_at = now
         db.commit()
-        return {"status": "recorded", "payment_status": data.get("payment_status", "unknown")}
+        return {"status": "accepted", "payment_status": "cancelled", "subscription_status": "cancelled"}
+
     try:
         received_amount = Decimal(data.get("amount_gross", ""))
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid PayFast payment amount.") from None
-    if not received_amount.is_finite() or received_amount != Decimal(payment.amount):
-        raise HTTPException(status_code=400, detail="PayFast payment amount does not match the expected amount.")
-    provider_payment_id = data.get("pf_payment_id", "").strip()
-    if not provider_payment_id:
-        raise HTTPException(status_code=400, detail="PayFast payment ID is missing.")
-    subscription = db.scalar(select(BusinessSubscription).where(
-        BusinessSubscription.id == payment.subscription_id,
-        BusinessSubscription.business_id == payment.business_id,
-    ))
-    if not subscription:
-        raise HTTPException(status_code=409, detail="Subscription record is unavailable.")
-    payment.status = "verified"
-    payment.pf_payment_id = provider_payment_id
-    payment.provider_subscription_token = data.get("token") or None
-    payment.verified_at = datetime.now(timezone.utc)
-    subscription.status = "active"
-    subscription.payment_provider = "payfast"
-    subscription.provider_subscription_reference = data.get("token") or None
-    subscription.provider_customer_reference = provider_payment_id
-    subscription.active_pos_count = payment.terminal_count
-    subscription.referral_discount_applied = payment.referral_discount_applied
-    subscription.updated_at = datetime.now(timezone.utc)
-    # A referred business only qualifies its referrer after its own subscription
-    # payment has been independently verified by PayFast. Keep this in the same
-    # transaction as activation so the reward cannot be granted on a partial write.
+    if not received_amount.is_finite() or received_amount <= 0:
+        raise HTTPException(status_code=400, detail="Invalid PayFast payment amount.")
+
+    is_initial_payment = bool(payment and payment.status in {"pending", "failed"})
+    if is_initial_payment:
+        expected_amount = Decimal(payment.amount)
+        if received_amount != expected_amount:
+            raise HTTPException(status_code=400, detail="PayFast payment amount does not match the expected amount.")
+        payment.status = "verified"
+        payment.pf_payment_id = provider_payment_id
+        payment.provider_subscription_token = subscription_token
+        payment.verified_at = now
+        subscription.status = "active"
+        subscription.payment_provider = "payfast"
+        subscription.provider_subscription_reference = subscription_token
+        subscription.provider_customer_reference = provider_payment_id
+        subscription.active_pos_count = payment.terminal_count
+        subscription.referral_discount_applied = payment.referral_discount_applied
+    else:
+        # Subsequent monthly charges are identified by the PayFast subscription
+        # token. m_payment_id is optional in PayFast's ITN contract.
+        if not subscription.provider_subscription_reference:
+            # Recover subscriptions activated before token persistence was enforced,
+            # but only when the merchant payment reference identifies that record.
+            if not payment or payment.status != "verified":
+                raise HTTPException(status_code=409, detail="PayFast subscription token is not linked to an active subscription.")
+            subscription.provider_subscription_reference = subscription_token
+            subscription.payment_provider = "payfast"
+            payment.provider_subscription_token = subscription_token
+        if subscription.provider_subscription_reference != subscription_token or subscription.payment_provider != "payfast":
+            raise HTTPException(status_code=409, detail="PayFast subscription token does not match an active subscription.")
+        unit_price = Decimal(subscription.discounted_unit_price if subscription.referral_discount_applied else subscription.unit_price)
+        expected_amount = unit_price * Decimal(subscription.active_pos_count)
+        if subscription.active_pos_count < 1 or expected_amount <= 0 or received_amount != expected_amount:
+            raise HTTPException(status_code=400, detail="Recurring PayFast amount does not match the active subscription price.")
+        # A late successful charge must not reactivate a subscription that has
+        # already received a cancellation notification.
+        if subscription.status != "cancelled":
+            subscription.status = "active"
+
     referral = db.scalar(select(BusinessReferral).where(
-        BusinessReferral.referred_business_id == payment.business_id,
+        BusinessReferral.referred_business_id == subscription.business_id,
     ))
-    if referral and referral.status == "pending_payment":
+    if referral and referral.status in {"pending_payment", "cancelled"} and subscription.status == "active":
         referral.status = "payment_verified"
+
+    db.add(PayFastCharge(
+        business_id=subscription.business_id,
+        subscription_id=subscription.id,
+        m_payment_id=payment_reference or None,
+        pf_payment_id=provider_payment_id,
+        provider_subscription_token=subscription_token,
+        payment_status="COMPLETE",
+        amount=received_amount,
+        currency="ZAR",
+        received_at=now,
+        verified_at=now,
+    ))
+    subscription.updated_at = now
     db.commit()
-    return {"status": "accepted", "payment_status": "verified",
-            "referral_payment_verified": bool(referral)}
+    return {
+        "status": "accepted",
+        "payment_status": "verified",
+        "recurring": not is_initial_payment,
+        "referral_payment_verified": bool(referral and referral.status == "payment_verified"),
+        "subscription_status": subscription.status,
+    }
