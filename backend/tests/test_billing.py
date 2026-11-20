@@ -175,3 +175,49 @@ def test_discovery_does_not_reactivate_a_manually_deactivated_terminal(client):
     assert refreshed["active_pos_terminals"] == 0
     assert refreshed["inactive_pos_terminals"] == 1
     assert refreshed["estimated_monthly_total"] == "0.00"
+
+
+def test_payfast_checkout_creates_pending_payment_without_activating_subscription(client, monkeypatch):
+    from app.core.config import settings
+    headers = register_owner(client, "payfast-checkout@example.com")
+    terminal = client.post("/api/v1/billing/terminals", headers=headers, json={"external_terminal_id": "PF-01", "display_name": "Main till"})
+    assert terminal.status_code == 201
+    monkeypatch.setattr(settings, "payfast_merchant_id", "10000100")
+    monkeypatch.setattr(settings, "payfast_merchant_key", "merchant-key")
+    monkeypatch.setattr(settings, "payfast_passphrase", "test-pass")
+    monkeypatch.setattr(settings, "payfast_sandbox", True)
+    response = client.post("/api/v1/billing/payfast/checkout", headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["amount"] == "499.00"
+    assert body["status"] == "pending_verification"
+    assert body["checkout_url"] == "https://sandbox.payfast.co.za/eng/process"
+    assert body["fields"]["notify_url"].endswith("/api/v1/billing/payfast/itn")
+    overview = client.get("/api/v1/billing/me", headers=headers).json()
+    assert overview["subscription_status"] == "pending"
+    assert overview["payment_status"] == "pending"
+
+
+def test_payfast_checkout_requires_active_pos_terminal(client, monkeypatch):
+    from app.core.config import settings
+    headers = register_owner(client, "payfast-no-pos@example.com")
+    monkeypatch.setattr(settings, "payfast_merchant_id", "10000100")
+    monkeypatch.setattr(settings, "payfast_merchant_key", "merchant-key")
+    monkeypatch.setattr(settings, "payfast_passphrase", "test-pass")
+    response = client.post("/api/v1/billing/payfast/checkout", headers=headers)
+    assert response.status_code == 400
+    assert "active POS terminal" in response.json()["detail"]
+
+
+def test_payfast_itn_rejects_invalid_signature(client, monkeypatch):
+    from app.core.config import settings
+    headers = register_owner(client, "payfast-itn-invalid@example.com")
+    monkeypatch.setattr(settings, "payfast_merchant_id", "10000100")
+    monkeypatch.setattr(settings, "payfast_passphrase", "test-pass")
+    response = client.post(
+        "/api/v1/billing/payfast/itn",
+        content="merchant_id=10000100&m_payment_id=unknown&signature=bad",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert response.status_code == 400
+    assert "signature" in response.json()["detail"].lower()
