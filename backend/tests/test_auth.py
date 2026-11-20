@@ -223,6 +223,7 @@ def test_deal_room_file_upload_requires_clean_scan_and_is_private(client, monkey
     room = client.post(f"/api/v1/network/conversations/{conversation['id']}/deal-room", headers=host_headers).json()
     monkeypatch.setattr(file_routes, "presigned_upload", lambda key, content_type, max_bytes: {"url": "https://private-upload.example/signed", "fields": {"key": key, "Content-Type": content_type}})
     monkeypatch.setattr(file_routes, "object_head", lambda key: {"ContentLength": 12, "ContentType": "application/pdf"})
+    monkeypatch.setattr(file_routes, "validate_object_content", lambda key, extension: None)
     monkeypatch.setattr(file_routes, "scan_object_with_clamav", lambda key: None)
     monkeypatch.setattr(file_routes, "promote_clean_object", lambda source, destination: None)
     monkeypatch.setattr(file_routes, "delete_object", lambda key: None)
