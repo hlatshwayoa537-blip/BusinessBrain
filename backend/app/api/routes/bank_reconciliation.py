@@ -75,11 +75,19 @@ async def import_statement(
             description = str(row.get(desc_key) or "").strip()
             if not description or amount == 0 or not amount.is_finite():
                 raise ValueError(f"Row {line_number} needs a description and a non-zero valid amount.")
+            if abs(amount) >= Decimal("1000000000000") or amount != amount.quantize(Decimal("0.01")):
+                raise ValueError(f"Amount on CSV row {line_number} must fit a bank value with no more than two decimal places.")
+            if balance is not None and (
+                not balance.is_finite()
+                or abs(balance) >= Decimal("1000000000000")
+                or balance != balance.quantize(Decimal("0.01"))
+            ):
+                raise ValueError(f"Balance on CSV row {line_number} must be a finite bank value with no more than two decimal places.")
             reference = str(row.get(ref_key) or "").strip()[:120] or None if ref_key else None
             external_id = str(row.get(id_key) or "").strip()[:120] or None if id_key else None
             currency = str(row.get(currency_key) or "ZAR").strip().upper()[:3] if currency_key else "ZAR"
-            if len(currency) != 3 or not currency.isalpha():
-                raise ValueError(f"Invalid currency on CSV row {line_number}.")
+            if currency != "ZAR":
+                raise ValueError(f"Currency on CSV row {line_number} is not supported yet. Import ZAR statements only.")
             parsed.append((txn_date, description[:240], reference, external_id, amount.quantize(Decimal("0.01")), balance, currency))
         if not parsed:
             raise ValueError("No valid transaction rows were found.")
