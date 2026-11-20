@@ -495,3 +495,26 @@ def test_payfast_itn_requires_recurring_subscription_token(client, monkeypatch):
     )
     assert response.status_code == 400
     assert "subscription token" in response.json()["detail"].lower()
+
+
+
+def test_payfast_checkout_uses_https_production_frontend_origin(client, monkeypatch):
+    from app.core.config import settings
+
+    headers = register_owner(client, "payfast-return-url@example.com")
+    client.post("/api/v1/billing/terminals", headers=headers, json={
+        "external_terminal_id": "PF-RETURN-01", "display_name": "Return URL till"
+    })
+    monkeypatch.setattr(settings, "payfast_merchant_id", "10000100")
+    monkeypatch.setattr(settings, "payfast_merchant_key", "merchant-key")
+    monkeypatch.setattr(settings, "payfast_passphrase", "test-pass")
+    monkeypatch.setattr(settings, "payfast_sandbox", True)
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(settings, "frontend_base_url", "http://localhost:5173")
+    monkeypatch.setattr(settings, "frontend_origins", "https://businessbrain-web.onrender.com")
+
+    response = client.post("/api/v1/billing/payfast/checkout", headers=headers)
+    assert response.status_code == 200
+    fields = response.json()["fields"]
+    assert fields["return_url"].startswith("https://businessbrain-web.onrender.com/")
+    assert fields["cancel_url"].startswith("https://businessbrain-web.onrender.com/")
