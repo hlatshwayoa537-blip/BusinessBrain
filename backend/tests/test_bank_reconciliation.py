@@ -258,7 +258,7 @@ def test_pos_settlement_batch_cannot_reuse_source_or_cross_business(client):
 
 
 def test_supplier_payment_exact_bank_match_and_duplicate_protection(client):
-    owner = register(client, "bank-supplier-payment@example.com", "Supplier Bank Match Shop")
+    owner = register(client, "bank-supplier-payment@example.com", "Supplier Bank Match Owner", "Supplier Bank Match Shop")
     headers = auth_headers(owner)
     supplier = client.post("/api/v1/procurement/suppliers", headers=headers, json={"name": "Verified Supplier"}).json()
     order = client.post("/api/v1/procurement/purchase-orders", headers=headers, json={
