@@ -343,6 +343,88 @@ def confirm_bank_match(
             "message": "Exact candidate link recorded. This is a reviewer-confirmed link, not independent proof of bank settlement."}
 
 
+@router.post("/transactions/{transaction_id}/create-finance-record", status_code=status.HTTP_201_CREATED)
+def create_finance_record_from_bank_transaction(
+    transaction_id: str,
+    payload: dict,
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    """Create one paid finance ledger entry from a signed bank statement row, with a shared audit link."""
+    membership = membership_for(user, db)
+    if membership.role not in {"owner", "admin"}:
+        raise HTTPException(status_code=403, detail="Only business owners or administrators can create financial records from bank statements.")
+    record = db.scalar(select(BankStatementTransaction).where(
+        BankStatementTransaction.id == transaction_id,
+        BankStatementTransaction.business_id == membership.business_id,
+    ))
+    if not record:
+        raise HTTPException(status_code=404, detail="Bank statement transaction not found.")
+    if record.reconciliation_status != "unmatched":
+        raise HTTPException(status_code=409, detail="Only unmatched bank transactions can create a finance record.")
+    if record.currency != "ZAR":
+        raise HTTPException(status_code=422, detail="Finance ledger creation from bank statements currently supports ZAR only.")
+    expected_kind = "income" if Decimal(str(record.amount)) > 0 else "expense"
+    kind = str(payload.get("kind") or "").strip().lower()
+    if kind != expected_kind:
+        raise HTTPException(status_code=422, detail=f"This bank transaction is a {expected_kind} based on its signed amount.")
+    category = str(payload.get("category") or "").strip()
+    description = str(payload.get("description") or "").strip()
+    if not category or len(category) > 80:
+        raise HTTPException(status_code=422, detail="Category is required and must be 80 characters or fewer.")
+    if not description or len(description) > 240:
+        raise HTTPException(status_code=422, detail="Description is required and must be 240 characters or fewer.")
+    amount = abs(Decimal(str(record.amount))).quantize(Decimal("0.01"))
+    finance_record = FinanceTransaction(
+        business_id=membership.business_id,
+        created_by_user_id=user.id,
+        kind=expected_kind,
+        category=category,
+        description=description,
+        amount=amount,
+        currency=record.currency,
+        status="paid",
+        occurred_on=record.transaction_date,
+        paid_on=record.transaction_date,
+        reference=record.reference,
+        notes=f"Created from imported bank statement transaction {record.id}. Original bank description: {record.description}",
+    )
+    db.add(finance_record)
+    db.flush()
+    db.add(BankStatementMatchLink(
+        business_id=membership.business_id,
+        bank_transaction_id=record.id,
+        source_type="finance",
+        source_id=finance_record.id,
+        signed_amount=Decimal(str(record.amount)).quantize(Decimal("0.01")),
+        source_date=record.transaction_date,
+        created_by_user_id=user.id,
+    ))
+    record.matched_source_type = "finance"
+    record.matched_source_id = finance_record.id
+    record.reconciliation_status = "matched"
+    record.review_note = f"Created paid {expected_kind} ledger entry from this imported bank row. Category: {category}. Amount copied exactly from bank evidence."
+    record.reviewed_by_user_id = user.id
+    record.reviewed_at = datetime.now(timezone.utc)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This bank transaction or source record was linked concurrently. No duplicate finance record was created.") from None
+    db.refresh(finance_record)
+    return {
+        "bank_transaction_id": record.id,
+        "reconciliation_status": record.reconciliation_status,
+        "finance_record": {
+            "id": finance_record.id, "kind": finance_record.kind, "category": finance_record.category,
+            "description": finance_record.description, "amount": money(finance_record.amount),
+            "currency": finance_record.currency, "status": finance_record.status,
+            "occurred_on": finance_record.occurred_on.isoformat(), "paid_on": finance_record.paid_on.isoformat(),
+            "reference": finance_record.reference,
+        },
+        "message": "Paid finance record created from the exact imported bank amount and linked for audit. The bank statement remains imported evidence, not a live bank connection.",
+    }
+
+
 @router.post("/transactions/{transaction_id}/review")
 def review_bank_transaction(
     transaction_id: str,

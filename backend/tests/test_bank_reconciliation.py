@@ -312,3 +312,71 @@ def test_supplier_payment_exact_bank_match_and_duplicate_protection(client):
     second_row = client.get("/api/v1/bank-reconciliation/transactions?reconciliation_status=unmatched", headers=headers).json()[0]
     second_suggestions = client.get(f"/api/v1/bank-reconciliation/transactions/{second_row['id']}/suggestions", headers=headers).json()
     assert all(item["source_type"] != "supplier_payment" for item in second_suggestions["candidates"])
+
+
+
+def test_bank_row_can_create_exact_paid_finance_entry_and_link_atomically(client):
+    owner = register(client, "bank-create-ledger@example.com", "Ledger Owner", "Ledger Shop")
+    headers = auth_headers(owner)
+    imported = client.post(
+        "/api/v1/bank-reconciliation/imports?account_label=Operating%20Account",
+        headers={**headers, "Content-Type": "text/csv"},
+        content="date,description,amount,reference\n2026-11-19,Monthly electricity,-850.00,ELEC-LEDGER-1\n",
+    )
+    assert imported.status_code == 201
+    row = client.get("/api/v1/bank-reconciliation/transactions?reconciliation_status=unmatched", headers=headers).json()[0]
+    created = client.post(
+        f"/api/v1/bank-reconciliation/transactions/{row['id']}/create-finance-record",
+        headers=headers,
+        json={"kind": "expense", "category": "Utilities", "description": "Monthly electricity"},
+    )
+    assert created.status_code == 201
+    result = created.json()
+    assert result["finance_record"]["amount"] == "850.00"
+    assert result["finance_record"]["kind"] == "expense"
+    assert result["finance_record"]["status"] == "paid"
+    assert result["finance_record"]["paid_on"] == "2026-11-19"
+    assert result["reconciliation_status"] == "matched"
+    finance_rows = client.get("/api/v1/finance/transactions", headers=headers).json()
+    assert len(finance_rows) == 1
+    assert finance_rows[0]["id"] == result["finance_record"]["id"]
+    matches = client.get(f"/api/v1/bank-reconciliation/transactions/{row['id']}/matches", headers=headers).json()
+    assert matches["matched_source_count"] == 1
+    assert matches["matches"][0]["source_type"] == "finance"
+    replay = client.post(
+        f"/api/v1/bank-reconciliation/transactions/{row['id']}/create-finance-record",
+        headers=headers,
+        json={"kind": "expense", "category": "Utilities", "description": "Duplicate attempt"},
+    )
+    assert replay.status_code == 409
+    assert len(client.get("/api/v1/finance/transactions", headers=headers).json()) == 1
+
+
+def test_bank_row_finance_creation_enforces_direction_currency_and_business_scope(client):
+    owner = register(client, "bank-create-scope@example.com", "Ledger Owner", "Ledger Shop")
+    other = register(client, "bank-create-other@example.com", "Other Owner", "Other Ledger Shop")
+    headers = auth_headers(owner)
+    imported = client.post(
+        "/api/v1/bank-reconciliation/imports?account_label=Operating%20Account",
+        headers={**headers, "Content-Type": "text/csv"},
+        content="date,description,amount\n2026-11-19,Customer deposit,250.00\n",
+    )
+    assert imported.status_code == 201
+    row = client.get("/api/v1/bank-reconciliation/transactions?reconciliation_status=unmatched", headers=headers).json()[0]
+    wrong_kind = client.post(
+        f"/api/v1/bank-reconciliation/transactions/{row['id']}/create-finance-record",
+        headers=headers, json={"kind": "expense", "category": "Other", "description": "Wrong direction"},
+    )
+    assert wrong_kind.status_code == 422
+    denied = client.post(
+        f"/api/v1/bank-reconciliation/transactions/{row['id']}/create-finance-record",
+        headers=auth_headers(other), json={"kind": "income", "category": "Sales", "description": "Foreign attempt"},
+    )
+    assert denied.status_code == 404
+    created = client.post(
+        f"/api/v1/bank-reconciliation/transactions/{row['id']}/create-finance-record",
+        headers=headers, json={"kind": "income", "category": "Sales", "description": "Customer deposit"},
+    )
+    assert created.status_code == 201
+    assert created.json()["finance_record"]["amount"] == "250.00"
+    assert created.json()["finance_record"]["kind"] == "income"
