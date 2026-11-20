@@ -281,7 +281,7 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     overview = client.get("/api/v1/billing/me", headers=headers).json()
     assert overview["subscription_status"] == "active"
     assert overview["payment_status"] == "paid"
-    assert overview["subscription_update_available"] is True
+    assert overview["subscription_update_available"] is False
 
     update_calls = []
     def fake_recurring_update(**kwargs):
@@ -290,11 +290,10 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     monkeypatch.setattr(billing_routes, "update_recurring_subscription_amount", fake_recurring_update)
     price_update = client.post("/api/v1/billing/payfast/update-amount", headers=headers)
     assert price_update.status_code == 200
+    assert price_update.json()["status"] == "already_synced"
     assert price_update.json()["recurring_amount"] == "499.00"
     assert price_update.json()["effective_for"] == "future recurring charges"
-    assert update_calls[0]["token"] == "dc0521d3-55fe-269b-fa00-b647310d760f"
-    assert update_calls[0]["amount"] == 499
-    assert update_calls[0]["sandbox"] is True
+    assert update_calls == []
 
     duplicate = client.post(
         "/api/v1/billing/payfast/itn",
