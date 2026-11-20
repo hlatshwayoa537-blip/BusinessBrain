@@ -335,7 +335,8 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     # and do not necessarily include m_payment_id or amount_gross.
     cancelled_fields = {
         "merchant_id": "10000100",
-        "pf_payment_id": "1089253",
+        "m_payment_id": payment_reference,
+        "pf_payment_id": "1089250",
         "payment_status": "CANCELLED",
         "item_name": "VEXION monthly subscription",
         "token": "dc0521d3-55fe-269b-fa00-b647310d760f",
