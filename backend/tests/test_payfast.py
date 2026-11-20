@@ -3,6 +3,7 @@ from decimal import Decimal
 from app.services.payfast import (
     CHECKOUT_URL_SANDBOX,
     build_subscription_checkout,
+    cancel_recurring_subscription,
     generate_signature,
     verify_itn_signature,
     money_string,
@@ -47,3 +48,59 @@ def test_payfast_money_requires_minimum_recurring_amount():
         pass
     else:
         raise AssertionError("Amounts below PayFast minimum must be rejected.")
+
+
+
+def test_payfast_subscription_cancellation_uses_signed_put(monkeypatch):
+    import httpx
+
+    calls = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"status": "success", "data": {"response": True}}
+
+    def fake_put(url, headers, timeout):
+        calls.update(url=url, headers=headers, timeout=timeout)
+        return Response()
+
+    monkeypatch.setattr(httpx, "put", fake_put)
+    result = cancel_recurring_subscription(
+        token="dc0521d3-55fe-269b-fa00-b647310d760f",
+        merchant_id="10000100",
+        passphrase="sandbox-pass",
+        sandbox=True,
+    )
+    assert result is True
+    assert calls["url"] == "https://api.payfast.co.za/subscriptions/dc0521d3-55fe-269b-fa00-b647310d760f/cancel?testing=true"
+    assert calls["headers"]["merchant-id"] == "10000100"
+    assert calls["headers"]["version"] == "v1"
+    assert len(calls["headers"]["signature"]) == 32
+    assert calls["timeout"] == 15.0
+
+
+def test_payfast_subscription_cancellation_requires_provider_confirmation(monkeypatch):
+    import httpx
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"status": "success", "data": {"response": False}}
+
+    monkeypatch.setattr(httpx, "put", lambda *args, **kwargs: Response())
+    try:
+        cancel_recurring_subscription(
+            token="dc0521d3-55fe-269b-fa00-b647310d760f",
+            merchant_id="10000100",
+            passphrase="sandbox-pass",
+            sandbox=True,
+        )
+    except ValueError as exc:
+        assert "invalid subscription cancellation response" in str(exc).lower()
+    else:
+        raise AssertionError("Cancellation must fail unless PayFast confirms it.")
