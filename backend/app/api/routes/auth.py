@@ -175,7 +175,6 @@ def request_password_reset(payload: PasswordResetRequest, db: Session = Depends(
         recent = db.scalar(select(UserActionToken).where(
             UserActionToken.user_id == user.id,
             UserActionToken.purpose == "password_reset",
-            UserActionToken.used_at.is_(None),
             UserActionToken.created_at >= now - timedelta(seconds=60),
         ))
         if not recent:
