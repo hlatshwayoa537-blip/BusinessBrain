@@ -1,6 +1,13 @@
+import hashlib
+from datetime import datetime as RealDateTime, timedelta
 from urllib.parse import urlparse, parse_qs
 
+from sqlalchemy import select
+
 from app.api.routes import auth as auth_routes
+from app.db import get_db
+from app.main import app
+from app.models import UserActionToken
 
 
 def registration_payload(email="founder@example.com"):
@@ -37,6 +44,16 @@ def test_password_reset_is_one_time_and_revokes_existing_access_tokens(client, m
     assert urlparse(sent[0]["reset_url"]).netloc == "businessbrain-web.onrender.com"
     raw_token = parse_qs(urlparse(sent[0]["reset_url"]).fragment)["reset_token"][0]
     assert len(raw_token) >= 32
+
+    db_generator = app.dependency_overrides[get_db]()
+    db = next(db_generator)
+    try:
+        stored_token = db.scalar(select(UserActionToken).where(UserActionToken.purpose == "password_reset"))
+        assert stored_token is not None
+        assert stored_token.token_hash == hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        assert stored_token.token_hash != raw_token
+    finally:
+        db_generator.close()
 
     # A second request inside the throttle window does not create another token or send another email.
     client.post("/api/v1/auth/password-reset/request", json={"email": "founder@example.com"})
@@ -75,3 +92,28 @@ def test_password_reset_unknown_email_uses_same_generic_response(client, monkeyp
     assert response.status_code == 202
     assert response.json()["message"].startswith("If an active account exists")
     assert sent == []
+
+
+
+def test_password_reset_expired_token_is_rejected(client, monkeypatch):
+    monkeypatch.setattr(auth_routes.settings, "smtp_host", "smtp.example.co.za")
+    monkeypatch.setattr(auth_routes.settings, "smtp_from_email", "no-reply@example.co.za")
+    sent = []
+    monkeypatch.setattr(auth_routes, "send_password_reset_email", lambda email, name, url: sent.append(url))
+    registration = client.post("/api/v1/auth/register", json=registration_payload("expired@example.com"))
+    assert registration.status_code == 201
+    client.post("/api/v1/auth/password-reset/request", json={"email": "expired@example.com"})
+    raw_token = parse_qs(urlparse(sent[0]).fragment)["reset_token"][0]
+
+    class FutureDateTime(RealDateTime):
+        @classmethod
+        def now(cls, tz=None):
+            return RealDateTime.now(tz) + timedelta(hours=1)
+
+    monkeypatch.setattr(auth_routes, "datetime", FutureDateTime)
+    response = client.post("/api/v1/auth/password-reset/confirm", json={
+        "token": raw_token,
+        "new_password": "A-new-strong-password-456",
+    })
+    assert response.status_code == 400
+    assert "expired" in response.json()["detail"]
