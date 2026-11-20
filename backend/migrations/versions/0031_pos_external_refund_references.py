@@ -26,6 +26,19 @@ def upgrade() -> None:
         "pos_transaction_lines",
         ["transaction_id", "external_line_id"],
     )
+    # Recover original-line links for historical inventory-tracked refunds.
+    # Older unmapped refund lines did not persist this relationship.
+    op.execute("""
+        UPDATE pos_transaction_lines AS refund_line
+        SET original_line_id = movement.source_id
+        FROM inventory_movements AS movement
+        JOIN pos_transactions AS refund_transaction
+          ON refund_transaction.id = movement.source_event_id
+        WHERE movement.source_line_id = refund_line.id
+          AND movement.source_type = 'pos_return'
+          AND refund_transaction.transaction_type = 'refund'
+          AND movement.source_id IS NOT NULL
+    """)
 
 
 def downgrade() -> None:
