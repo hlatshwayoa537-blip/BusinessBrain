@@ -479,7 +479,7 @@ async def receive_payfast_itn(request: Request, db: Session = Depends(get_db)) -
         ))
         subscription.updated_at = now
         db.commit()
-        return {"status": "accepted", "payment_status": "cancelled", "subscription_status": "cancelled"}
+        return {"status": "accepted", "payment_status": "cancelled", "subscription_status": subscription.status}
 
     try:
         received_amount = Decimal(data.get("amount_gross", ""))
