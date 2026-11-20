@@ -402,7 +402,7 @@ class BusinessSubscription(Base):
     referral_discount_applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     payment_provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
     provider_customer_reference: Mapped[str | None] = mapped_column(String(180), nullable=True)
-    provider_subscription_reference: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    provider_subscription_reference: Mapped[str | None] = mapped_column(String(180), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
@@ -427,6 +427,22 @@ class PayFastPayment(Base):
     provider_subscription_token: Mapped[str | None] = mapped_column(String(180), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+class PayFastCharge(Base):
+    __tablename__ = "payfast_charges"
+    __table_args__ = (UniqueConstraint("pf_payment_id", "payment_status", name="uq_payfast_charge_provider_event"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    subscription_id: Mapped[str] = mapped_column(ForeignKey("business_subscriptions.id", ondelete="CASCADE"), nullable=False, index=True)
+    m_payment_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    pf_payment_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    provider_subscription_token: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    payment_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="ZAR")
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
 
 class Discrepancy(Base):
     __tablename__ = "discrepancies"

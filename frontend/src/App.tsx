@@ -923,7 +923,7 @@ function BillingWorkspace({session}:{session:AuthData}) {
   }
 
   return <section className="billing-workspace" id="billing">
-    <div className="profile-centre-heading"><div><div className="eyebrow">VEXION SUBSCRIPTION</div><h2>POS-based pricing and subscription overview.</h2><p>Track registered tills, pay securely through PayFast and manage your recurring monthly price.</p></div><span className={"profile-status billing-status-"+(data?.payment_status||"loading")}>{data?.payment_status==="paid"?"Subscription active":data?.payment_status==="pending"?"Payment pending":data?.payment_status==="not_configured"?"Not subscribed":"Loading"}</span></div>
+    <div className="profile-centre-heading"><div><div className="eyebrow">VEXION SUBSCRIPTION</div><h2>POS-based pricing and subscription overview.</h2><p>Track registered tills, pay securely through PayFast and manage your recurring monthly price.</p></div><span className={"profile-status billing-status-"+(data?.payment_status||"loading")}>{data?.payment_status==="paid"?"Subscription active":data?.payment_status==="pending"?"Payment pending":data?.payment_status==="not_configured"?"Not subscribed":data?.payment_status==="cancelled"?"Subscription cancelled":data?.payment_status==="failed"?"Payment failed":"Loading"}</span></div>
     {error&&<p className="finance-alert" role="alert">{error}</p>}{message&&<p className="finance-success" role="status">{message}</p>}
     {loading?<p className="network-empty">Loading billing overview…</p>:data&&<>
       <div className="billing-stats">
