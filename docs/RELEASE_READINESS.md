@@ -18,6 +18,7 @@ A feature is not release-approved solely because its pull request merged, CI pas
 | Area | Status | Verified boundary / outstanding work |
 |---|---|---|
 | Authentication and business workspaces | Ready | Registration, login, signed access tokens, business membership and selected-workspace switching are implemented and covered by automated tests. Complete a full permission and tenant-isolation review before launch. |
+| Email verification and password recovery | Needs fixing / Needs external access | Authentication currently provides registration and login but no email-verification or self-service password-reset endpoints. SMTP configuration fields exist, but a mail provider is not configured or tested. |
 | POS ingestion | Ready | Generic normalized transaction ingestion, webhook authentication, idempotency, terminal discovery and mapped CSV import exist. Linked refunds use provider-native original receipt and line references (PR #79); legacy VEXION UUID references remain supported. POS timestamps must include an explicit timezone offset; stored values are normalized to UTC and daily analytics group by Africa/Johannesburg local date (PR #81). |
 | Named POS provider integrations | Needs external access | No named vendor adapter has been proven against a live POS provider. Do not claim a vendor is integrated until its adapter and real feed are tested. |
 | Daily Business Close | Ready | Close and reconciliation workflows are implemented with automated coverage. Verify calculations against real till close reports before pilot sign-off. |
