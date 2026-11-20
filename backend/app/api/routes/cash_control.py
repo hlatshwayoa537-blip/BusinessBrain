@@ -128,7 +128,7 @@ def cash_control_overview(
 
     payables = db.scalars(select(SupplierInvoicePayable).where(
         SupplierInvoicePayable.business_id == business_id,
-        SupplierInvoicePayable.status.in_(["open", "partial", "overdue"]),
+        SupplierInvoicePayable.status.in_(["open", "partially_paid"]),
     )).all()
     for payable in payables:
         balance = max(ZERO, Decimal(payable.balance_due))
