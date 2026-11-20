@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from app.api.business_context import get_business_membership
 from app.api.routes.auth import get_current_user
 from app.db import get_db
 from app.models import BankStatementImport, BankStatementMatchLink, BankStatementTransaction, FinanceTransaction, Membership, POSTransaction, SupplierInvoicePayment, User
@@ -19,7 +20,7 @@ MAX_ROWS = 5000
 
 
 def membership_for(user: User, db: Session) -> Membership:
-    membership = db.scalar(select(Membership).where(Membership.user_id == user.id).order_by(Membership.created_at))
+    membership = get_business_membership(user, db)
     if not membership:
         raise HTTPException(status_code=403, detail="A business workspace is required.")
     if membership.role not in {"owner", "admin", "manager"}:
