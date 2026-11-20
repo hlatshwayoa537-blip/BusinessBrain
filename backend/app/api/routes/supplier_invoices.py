@@ -404,7 +404,7 @@ def approve_supplier_invoice(invoice_id: str, payload: ApprovalInput, db: Sessio
 
 
 
-@router.get("/payables")
+@router.get("/payables/list")
 def list_supplier_payables(
     status_filter: str | None = Query(default=None, alias="status", pattern=r"^(open|partially_paid|paid)$"),
     db: Session = Depends(get_db), user: User = Depends(get_current_user),
