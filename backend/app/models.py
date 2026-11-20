@@ -15,8 +15,21 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(24), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     memberships: Mapped[list["Membership"]] = relationship(back_populates="user")
+
+class UserActionToken(Base):
+    __tablename__ = "user_action_tokens"
+    __table_args__ = (UniqueConstraint("token_hash", name="uq_user_action_tokens_token_hash"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
 
 class Business(Base):
     __tablename__ = "businesses"
