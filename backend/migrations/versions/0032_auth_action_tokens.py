@@ -11,7 +11,6 @@ depends_on = None
 
 def upgrade() -> None:
     op.add_column("users", sa.Column("token_version", sa.Integer(), nullable=False, server_default="0"))
-    op.alter_column("users", "token_version", server_default=None)
     op.create_table(
         "user_action_tokens",
         sa.Column("id", sa.String(length=36), nullable=False),
