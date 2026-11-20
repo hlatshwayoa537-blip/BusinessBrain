@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.business_context import get_business_membership
 from app.api.routes.auth import get_current_user
 from app.db import get_db
 from app.models import Business, BusinessConversation, DealRoom, DealRoomFile, Membership, User
@@ -45,7 +46,7 @@ class FileResponse(BaseModel):
     created_at: datetime
 
 def _business(db: Session, user: User) -> Business:
-    membership = db.scalar(select(Membership).where(Membership.user_id == user.id).order_by(Membership.created_at))
+    membership = get_business_membership(user, db)
     business = db.get(Business, membership.business_id) if membership else None
     if not business:
         raise HTTPException(status_code=403, detail="No business workspace is linked to this account.")
