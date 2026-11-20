@@ -1,19 +1,28 @@
+import hashlib
+import logging
+import secrets
+from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.db import get_db
+from app.core.config import settings
 from app.api.business_context import get_business_membership
-from app.models import Business, BusinessReferral, BusinessReferralProfile, Membership, User
-from app.schemas import AuthResponse, BusinessProfileUpdate, BusinessResponse, LoginRequest, RegisterRequest, UserResponse
-from app.security import create_access_token, decode_access_token, decode_access_token_business_id, hash_password, verify_password
+from app.models import Business, BusinessReferral, BusinessReferralProfile, Membership, User, UserActionToken
+from app.schemas import AuthResponse, BusinessProfileUpdate, BusinessResponse, LoginRequest, PasswordResetConfirm, PasswordResetRequest, RegisterRequest, UserResponse
+from app.security import create_access_token, decode_access_token, decode_access_token_business_id, decode_access_token_version, hash_password, verify_password
+from app.services.email import send_password_reset_email
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
+logger = logging.getLogger(__name__)
 bearer = HTTPBearer(auto_error=False)
 
 def build_auth_response(user: User, business: Business) -> AuthResponse:
-    return AuthResponse(access_token=create_access_token(user.id, business.id), user=UserResponse.model_validate(user), business=business)
+    return AuthResponse(access_token=create_access_token(user.id, business.id, user.token_version), user=UserResponse.model_validate(user), business=business)
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthResponse:
@@ -77,6 +86,8 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
     user = db.get(User, user_id)
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="Account is unavailable.")
+    if decode_access_token_version(credentials.credentials) != user.token_version:
+        raise HTTPException(status_code=401, detail="This access token has been revoked. Please sign in again.")
     user.active_business_id = decode_access_token_business_id(credentials.credentials)
     return user
 
@@ -109,7 +120,7 @@ def switch_business_workspace(payload: dict, current_user: User = Depends(get_cu
     business = db.get(Business, business_id)
     if not business:
         raise HTTPException(status_code=404, detail="Business workspace not found.")
-    return {"access_token": create_access_token(current_user.id, business.id), "token_type": "bearer",
+    return {"access_token": create_access_token(current_user.id, business.id, current_user.token_version), "token_type": "bearer",
             "business": BusinessResponse.model_validate(business),
             "user": UserResponse.model_validate(current_user)}
 
@@ -149,3 +160,70 @@ def update_business_profile(payload: BusinessProfileUpdate, current_user: User =
     db.commit()
     db.refresh(business)
     return BusinessResponse.model_validate(business)
+
+
+@router.post("/password-reset/request", status_code=status.HTTP_202_ACCEPTED)
+def request_password_reset(payload: PasswordResetRequest, db: Session = Depends(get_db)) -> dict:
+    # Check mail configuration before looking up the account so this response
+    # does not reveal whether a particular email address is registered.
+    if not settings.smtp_host or not settings.smtp_from_email:
+        raise HTTPException(status_code=503, detail="Password recovery email is not configured.")
+    email = str(payload.email).strip().lower()
+    user = db.scalar(select(User).where(User.email == email))
+    now = datetime.now(timezone.utc)
+    if user and user.is_active:
+        recent = db.scalar(select(UserActionToken).where(
+            UserActionToken.user_id == user.id,
+            UserActionToken.purpose == "password_reset",
+            UserActionToken.used_at.is_(None),
+            UserActionToken.created_at >= now - timedelta(seconds=60),
+        ))
+        if not recent:
+            db.execute(update(UserActionToken).where(
+                UserActionToken.user_id == user.id,
+                UserActionToken.purpose == "password_reset",
+                UserActionToken.used_at.is_(None),
+            ).values(used_at=now))
+            raw_token = secrets.token_urlsafe(32)
+            token_record = UserActionToken(
+                user_id=user.id,
+                token_hash=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
+                purpose="password_reset",
+                expires_at=now + timedelta(minutes=30),
+            )
+            db.add(token_record)
+            db.commit()
+            reset_url = f"{settings.frontend_base_url.rstrip('/')}/?reset_token={quote(raw_token)}"
+            try:
+                send_password_reset_email(user.email, user.full_name, reset_url)
+            except Exception:
+                token_record.used_at = now
+                db.commit()
+                logger.exception("Password reset email delivery failed for user_id=%s", user.id)
+    return {"message": "If an active account exists for that email, password reset instructions will be sent."}
+
+
+@router.post("/password-reset/confirm")
+def confirm_password_reset(payload: PasswordResetConfirm, db: Session = Depends(get_db)) -> dict:
+    now = datetime.now(timezone.utc)
+    token_hash = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
+    token_record = db.scalar(select(UserActionToken).where(
+        UserActionToken.token_hash == token_hash,
+        UserActionToken.purpose == "password_reset",
+        UserActionToken.used_at.is_(None),
+        UserActionToken.expires_at > now,
+    ))
+    if not token_record:
+        raise HTTPException(status_code=400, detail="This password reset link is invalid or has expired.")
+    user = db.get(User, token_record.user_id)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=400, detail="This password reset link is invalid or has expired.")
+    user.password_hash = hash_password(payload.new_password)
+    user.token_version += 1
+    db.execute(update(UserActionToken).where(
+        UserActionToken.user_id == user.id,
+        UserActionToken.purpose == "password_reset",
+        UserActionToken.used_at.is_(None),
+    ).values(used_at=now))
+    db.commit()
+    return {"message": "Password reset successfully. Sign in with your new password."}
