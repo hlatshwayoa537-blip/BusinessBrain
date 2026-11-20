@@ -231,7 +231,8 @@ def scan_object_with_clamav(key: str) -> None:
                 response_bytes.extend(chunk)
                 if len(response_bytes) > 4096:
                     break
-            result = response_bytes.decode("utf-8", errors="replace").strip()
+            complete_response = response_bytes.endswith(b"\\n")
+    result = response_bytes.decode("utf-8", errors="replace").strip()
     except OSError as exc:
         raise HTTPException(status_code=503, detail="Malware scanning service is unavailable. The file remains quarantined.") from exc
     finally:
@@ -241,7 +242,7 @@ def scan_object_with_clamav(key: str) -> None:
     # be interpreted as a successful scan.
     if result.endswith(" FOUND"):
         raise HTTPException(status_code=422, detail="The uploaded file failed the malware scan and cannot be shared.")
-    if result not in {"stream: OK", "OK"}:
+    if not complete_response or result not in {"stream: OK", "OK"}:
         raise HTTPException(status_code=503, detail="Malware scanner returned an invalid or incomplete response. The file remains quarantined.")
 
 
