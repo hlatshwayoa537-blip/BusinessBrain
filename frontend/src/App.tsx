@@ -1397,6 +1397,12 @@ export default function App() {
   const [recoveryMessage, setRecoveryMessage] = useState("");
   const [recoveryError, setRecoveryError] = useState("");
   const [authNotice, setAuthNotice] = useState("");
+
+  useEffect(() => {
+    if (recoveryToken && window.location.hash) {
+      window.history.replaceState({}, "", window.location.pathname + window.location.search);
+    }
+  }, [recoveryToken]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [fullName, setFullName] = useState("");
