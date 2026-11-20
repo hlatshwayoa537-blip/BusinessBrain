@@ -139,7 +139,7 @@ def billing_overview(user: User = Depends(get_current_user), db: Session = Depen
     return {
         "currency": "ZAR",
         "subscription_status": subscription.status if subscription else "not_started",
-        "payment_status": "paid" if subscription and subscription.status == "active" else ("pending" if subscription and subscription.status == "pending" else "not_configured"),
+        "payment_status": "paid" if subscription and subscription.status == "active" else ("pending" if subscription and subscription.status == "pending" else "cancelled" if subscription and subscription.status == "cancelled" else "failed" if subscription and subscription.status == "failed" else "not_configured"),
         "payment_provider": subscription.payment_provider if subscription else None,
         "active_pos_terminals": active_count,
         "inactive_pos_terminals": len(terminals) - active_count,
