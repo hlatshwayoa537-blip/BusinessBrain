@@ -1,4 +1,6 @@
 """Supplier accounts payable and payment ledger."""
+import uuid
+from datetime import datetime, timezone
 from alembic import op
 import sqlalchemy as sa
 
@@ -25,6 +27,28 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint("invoice_id", name="uq_supplier_invoice_payable_invoice"),
     )
+    # Preserve approved invoices created before this migration by opening an
+    # unpaid payable for each one. Approval is not evidence of payment.
+    bind = op.get_bind()
+    approved_invoices = bind.execute(sa.text(
+        "SELECT id, business_id, supplier_id, currency, total, due_date "
+        "FROM supplier_invoices WHERE status = 'approved'"
+    )).mappings().all()
+    now = datetime.now(timezone.utc)
+    for invoice in approved_invoices:
+        bind.execute(sa.text(
+            "INSERT INTO supplier_invoice_payables "
+            "(id, business_id, invoice_id, supplier_id, currency, total_amount, amount_paid, "
+            "balance_due, due_date, status, created_at, updated_at) "
+            "VALUES (:id, :business_id, :invoice_id, :supplier_id, :currency, :total_amount, "
+            ":amount_paid, :balance_due, :due_date, :status, :created_at, :updated_at)"
+        ), {
+            "id": str(uuid.uuid4()), "business_id": invoice["business_id"],
+            "invoice_id": invoice["id"], "supplier_id": invoice["supplier_id"],
+            "currency": invoice["currency"], "total_amount": invoice["total"],
+            "amount_paid": 0, "balance_due": invoice["total"], "due_date": invoice["due_date"],
+            "status": "open", "created_at": now, "updated_at": now,
+        })
     for column in ("business_id", "invoice_id", "supplier_id", "status"):
         op.create_index(f"ix_supplier_invoice_payables_{column}", "supplier_invoice_payables", [column])
     op.create_table(
