@@ -476,6 +476,12 @@ async def receive_payfast_itn(request: Request, db: Session = Depends(get_db)) -
         PayFastPayment.m_payment_id == payment_reference,
     )) if payment_reference else None
 
+    if not payment:
+        # PayFast may omit m_payment_id on recurring and cancellation ITNs.
+        # Recover the originating checkout by the persistent subscription token.
+        payment = db.scalar(select(PayFastPayment).where(
+            PayFastPayment.provider_subscription_token == subscription_token,
+        ))
     if payment:
         subscription = db.scalar(select(BusinessSubscription).where(
             BusinessSubscription.id == payment.subscription_id,
@@ -484,7 +490,10 @@ async def receive_payfast_itn(request: Request, db: Session = Depends(get_db)) -
         if not subscription:
             raise HTTPException(status_code=409, detail="Subscription record is unavailable.")
         if subscription.provider_subscription_reference and subscription.provider_subscription_reference != subscription_token:
-            raise HTTPException(status_code=409, detail="PayFast subscription token does not match this payment.")
+            # A historical token can still send delayed cancellation notifications
+            # after a new checkout has cleared the current token.
+            if payment_status != "CANCELLED" or subscription.status != "pending":
+                raise HTTPException(status_code=409, detail="PayFast subscription token does not match this payment.")
         if payment_status == "COMPLETE" and payment.status == "verified" and payment.pf_payment_id == provider_payment_id:
             return {"status": "accepted", "duplicate": True}
     else:
