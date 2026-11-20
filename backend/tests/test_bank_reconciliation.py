@@ -380,3 +380,41 @@ def test_bank_row_finance_creation_enforces_direction_currency_and_business_scop
     assert created.status_code == 201
     assert created.json()["finance_record"]["amount"] == "250.00"
     assert created.json()["finance_record"]["kind"] == "income"
+
+
+
+def test_bank_statement_rejects_non_zar_currency_until_matching_supports_it(client):
+    owner = register(client, "bank-currency-owner@example.com", "Currency Owner", "Currency Shop")
+    response = client.post(
+        "/api/v1/bank-reconciliation/imports?account_label=Foreign%20Currency%20Account",
+        headers={**auth_headers(owner), "Content-Type": "text/csv"},
+        content="date,description,amount,currency\n2026-11-19,Foreign transfer,100.00,USD\n",
+    )
+    assert response.status_code == 422
+    assert "ZAR statements only" in response.json()["detail"]
+    assert client.get("/api/v1/bank-reconciliation/imports", headers=auth_headers(owner)).json() == []
+
+
+def test_bank_statement_rejects_non_finite_running_balance(client):
+    owner = register(client, "bank-balance-owner@example.com", "Balance Owner", "Balance Shop")
+    for invalid_balance in ["NaN", "Infinity", "-Infinity"]:
+        response = client.post(
+            "/api/v1/bank-reconciliation/imports?account_label=Operating%20Account",
+            headers={**auth_headers(owner), "Content-Type": "text/csv"},
+            content=f"date,description,amount,balance\n2026-11-19,Card settlement,100.00,{invalid_balance}\n",
+        )
+        assert response.status_code == 422
+        assert "finite bank value" in response.json()["detail"]
+    assert client.get("/api/v1/bank-reconciliation/transactions", headers=auth_headers(owner)).json() == []
+
+
+def test_bank_statement_rejects_amounts_with_more_than_two_decimal_places(client):
+    owner = register(client, "bank-precision-owner@example.com", "Precision Owner", "Precision Shop")
+    response = client.post(
+        "/api/v1/bank-reconciliation/imports?account_label=Operating%20Account",
+        headers={**auth_headers(owner), "Content-Type": "text/csv"},
+        content="date,description,amount,balance\n2026-11-19,Card settlement,100.001,500.00\n",
+    )
+    assert response.status_code == 422
+    assert "two decimal places" in response.json()["detail"]
+    assert client.get("/api/v1/bank-reconciliation/transactions", headers=auth_headers(owner)).json() == []
