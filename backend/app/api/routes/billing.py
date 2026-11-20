@@ -164,7 +164,7 @@ def billing_overview(user: User = Depends(get_current_user), db: Session = Depen
             and subscription.status == "active" and subscription.provider_subscription_reference
         ),
         "terminals": [terminal_payload(row) for row in terminals],
-        "notice": "VEXION activates subscriptions only after a verified PayFast notification. Displayed estimates use the current active POS count and referral eligibility; recurring price changes take effect only after PayFast confirms them.",
+        "notice": "No payment has been collected yet unless a PayFast notification has been verified. VEXION displays estimates using the current active POS count and referral eligibility; recurring price changes take effect only after PayFast confirms them.",
     }
 
 
@@ -362,6 +362,20 @@ def update_payfast_recurring_amount(user: User = Depends(get_current_user), db: 
     discounted = paid_referrals >= 5
     unit_price = REFERRAL_PRICE if discounted else STANDARD_PRICE
     target_amount = (unit_price * active_count).quantize(Decimal("0.01"))
+    if (
+        subscription.active_pos_count == active_count
+        and subscription.referral_discount_applied == discounted
+    ):
+        return {
+            "status": "already_synced",
+            "currency": "ZAR",
+            "recurring_amount": f"{target_amount:.2f}",
+            "unit_price_per_pos_month": str(unit_price),
+            "active_pos_terminals": active_count,
+            "verified_direct_referrals": paid_referrals,
+            "referral_discount_applied": discounted,
+            "effective_for": "future recurring charges",
+        }
     try:
         amount_cents = update_recurring_subscription_amount(
             token=subscription.provider_subscription_reference,
