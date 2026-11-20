@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -40,7 +40,7 @@ def cash_control_overview(
     user: User = Depends(get_current_user),
 ):
     membership = membership_for(user, db)
-    today = date.today()
+    today = datetime.now(BUSINESS_TZ).date()
     horizon_end = today + timedelta(days=horizon_days)
     business_id = membership.business_id
 
