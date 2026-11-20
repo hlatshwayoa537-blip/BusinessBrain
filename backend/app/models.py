@@ -671,3 +671,22 @@ class SupplierInvoicePayment(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     recorded_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class CustomerInvoicePayment(Base):
+    __tablename__ = "customer_invoice_payments"
+    __table_args__ = (
+        UniqueConstraint("business_id", "idempotency_key", name="uq_customer_invoice_payment_idempotency"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    invoice_id: Mapped[str] = mapped_column(ForeignKey("invoices.id", ondelete="RESTRICT"), nullable=False, index=True)
+    amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="ZAR")
+    payment_date: Mapped[date] = mapped_column(Date, nullable=False)
+    payment_method: Mapped[str] = mapped_column(String(40), nullable=False, default="manual")
+    reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recorded_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
