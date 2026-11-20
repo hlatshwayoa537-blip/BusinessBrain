@@ -73,6 +73,12 @@ def _valid_ooxml(data: bytes, extension: str) -> bool:
                     or info.file_size / info.compress_size > MAX_ARCHIVE_COMPRESSION_RATIO
                 ):
                     return False
+            if len(names) != len(infos):
+                return False
+            # Verify CRCs for every member, including the actual document body.
+            # testzip streams members and catches corrupt/truncated ZIP payloads.
+            if archive.testzip() is not None:
+                return False
             content_types = archive.read("[Content_Types].xml")
             # Require the correct OOXML main-part content type, not just a ZIP
             # containing a conveniently named XML file.
@@ -217,14 +223,27 @@ def scan_object_with_clamav(key: str) -> None:
                     break
                 sock.sendall(struct.pack("!I", len(chunk)) + chunk)
             sock.sendall(struct.pack("!I", 0))
-            result = sock.recv(4096).decode("utf-8", errors="replace").strip()
+            response_bytes = bytearray()
+            while b"\n" not in response_bytes:
+                chunk = sock.recv(1024)
+                if not chunk:
+                    break
+                response_bytes.extend(chunk)
+                if len(response_bytes) > 4096:
+                    break
+            complete_response = response_bytes.endswith(b"\n")
+            result = response_bytes.decode("utf-8", errors="replace").strip()
     except OSError as exc:
         raise HTTPException(status_code=503, detail="Malware scanning service is unavailable. The file remains quarantined.") from exc
     finally:
         response["Body"].close()
-    if not result.endswith("OK"):
+    # Accept only ClamAV's explicit clean verdict. A response such as
+    # "NOT OK", an empty response, or a truncated protocol reply must never
+    # be interpreted as a successful scan.
+    if result.endswith(" FOUND"):
         raise HTTPException(status_code=422, detail="The uploaded file failed the malware scan and cannot be shared.")
-
+    if not complete_response or result not in {"stream: OK", "OK"}:
+        raise HTTPException(status_code=503, detail="Malware scanner returned an invalid or incomplete response. The file remains quarantined.")
 
 def promote_clean_object(source_key: str, destination_key: str) -> None:
     client = s3_client()

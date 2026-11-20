@@ -109,3 +109,64 @@ def test_content_validation_enforces_actual_download_size_limit(monkeypatch):
     with pytest.raises(HTTPException) as error:
         validate(monkeypatch, b"x" * (private_storage.MAX_EVIDENCE_BYTES + 1), ".txt")
     assert error.value.status_code == 413
+
+
+class FakeClamSocket:
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.sent = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def settimeout(self, value):
+        self.timeout = value
+
+    def sendall(self, value):
+        self.sent.append(value)
+
+    def recv(self, size):
+        return self.replies.pop(0) if self.replies else b""
+
+
+@pytest.mark.parametrize(
+    ("replies", "expected_status"),
+    [
+        ([b"stream: ", b"OK\n"], None),
+        ([b"stream: Eicar-Test-Signature FOUND\n"], 422),
+        ([b"NOT OK\n"], 503),
+        ([b""], 503),
+        ([b"stream: OK"], 503),
+    ],
+)
+def test_clamav_requires_a_complete_explicit_clean_verdict(monkeypatch, replies, expected_status):
+    monkeypatch.setattr(private_storage, "s3_client", lambda: FakeS3(b"safe evidence"))
+    monkeypatch.setattr(private_storage.settings, "clamav_host", "scanner.internal")
+    monkeypatch.setattr(private_storage.settings, "clamav_port", 3310)
+    monkeypatch.setattr(private_storage.settings, "clamav_timeout_seconds", 5)
+    fake_socket = FakeClamSocket(replies)
+    monkeypatch.setattr(private_storage.socket, "create_connection", lambda *args, **kwargs: fake_socket)
+
+    if expected_status is None:
+        private_storage.scan_object_with_clamav("quarantine/test")
+    else:
+        with pytest.raises(HTTPException) as error:
+            private_storage.scan_object_with_clamav("quarantine/test")
+        assert error.value.status_code == expected_status
+
+
+def test_ooxml_rejects_corrupt_document_member_crc(monkeypatch):
+    payload = bytearray(make_ooxml(".docx"))
+    # Corrupt the central-directory CRC for the real document part. ZIP
+    # parsing still succeeds, but testzip must reject the inconsistent member.
+    name_offset = payload.rfind(b"word/document.xml")
+    assert name_offset > 46
+    central_header = name_offset - 46
+    crc_offset = central_header + 16
+    payload[crc_offset] ^= 0x01
+    with pytest.raises(HTTPException) as error:
+        validate(monkeypatch, bytes(payload), ".docx")
+    assert error.value.status_code == 422
