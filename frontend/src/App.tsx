@@ -854,6 +854,8 @@ type BillingOverview = {
   referral_unit_price: string;
   checkout_available: boolean;
   subscription_update_available: boolean;
+  subscription_price_out_of_sync: boolean;
+  cancel_available: boolean;
   notice: string;
   terminals: {id:string;external_terminal_id:string;display_name:string;branch_name?:string|null;connection_id?:string|null;source?:string;status:string;created_at:string}[];
 };
@@ -869,6 +871,7 @@ function BillingWorkspace({session}:{session:AuthData}) {
   const [branchName,setBranchName]=useState("");
   const [checkoutBusy,setCheckoutBusy]=useState(false);
   const [priceSyncBusy,setPriceSyncBusy]=useState(false);
+  const [cancelBusy,setCancelBusy]=useState(false);
 
   async function request(path:string,method="GET",body?:unknown) {
     const response=await fetch(API_BASE+path,{method,headers:{Authorization:"Bearer "+session.access_token,...(body?{"Content-Type":"application/json"}:{})},...(body?{body:JSON.stringify(body)}:{})});
@@ -922,6 +925,17 @@ function BillingWorkspace({session}:{session:AuthData}) {
     finally {setPriceSyncBusy(false);}
   }
 
+  async function cancelSubscription() {
+    if(!window.confirm("Cancel future PayFast renewals for this business?")) return;
+    setCancelBusy(true);setError("");setMessage("");
+    try {
+      const result=await request("/billing/payfast/cancel","POST") as {already_cancelled:boolean};
+      setMessage(result.already_cancelled?"This subscription was already cancelled.":"PayFast confirmed cancellation. Future renewals have been stopped.");
+      await load();
+    } catch(err) {setError(err instanceof Error?err.message:"The PayFast subscription could not be cancelled.");}
+    finally {setCancelBusy(false);}
+  }
+
   return <section className="billing-workspace" id="billing">
     <div className="profile-centre-heading"><div><div className="eyebrow">VEXION SUBSCRIPTION</div><h2>POS-based pricing and subscription overview.</h2><p>Track registered tills, pay securely through PayFast and manage your recurring monthly price.</p></div><span className={"profile-status billing-status-"+(data?.payment_status||"loading")}>{data?.payment_status==="paid"?"Subscription active":data?.payment_status==="pending"?"Payment pending":data?.payment_status==="not_configured"?"Not subscribed":data?.payment_status==="cancelled"?"Subscription cancelled":data?.payment_status==="failed"?"Payment failed":"Loading"}</span></div>
     {error&&<p className="finance-alert" role="alert">{error}</p>}{message&&<p className="finance-success" role="status">{message}</p>}
@@ -935,9 +949,11 @@ function BillingWorkspace({session}:{session:AuthData}) {
       <div className="billing-price-note"><strong>Pricing rules</strong><span>R499 per active POS terminal each month. After five directly referred businesses have verified paid subscriptions, your rate becomes R399 per active POS terminal each month. The lower rate is applied to future recurring charges after PayFast confirms the update.</span></div>
       <div className="billing-actions">
         {data.payment_status==="paid"&&data.subscription_update_available&&<button type="button" className="network-primary-button" onClick={()=>void syncRecurringPrice()} disabled={priceSyncBusy}>{priceSyncBusy?"Updating PayFast…":"Apply current price to next recurring charge"}</button>}
+        {data.payment_status==="paid"&&data.cancel_available&&<button type="button" className="billing-cancel-button" onClick={()=>void cancelSubscription()} disabled={cancelBusy}>{cancelBusy?"Cancelling…":"Cancel subscription"}</button>}
         {data.payment_status!=="paid"&&data.checkout_available&&<button type="button" className="network-primary-button" onClick={()=>void startCheckout()} disabled={checkoutBusy||data.active_pos_terminals<1}>{checkoutBusy?"Opening secure checkout…":data.payment_status==="pending"?"Retry secure checkout":"Subscribe securely with PayFast"}</button>}
-        {!data.checkout_available&&<span className="billing-setup-note">PayFast checkout is not enabled yet. The merchant account credentials must be configured before customers can pay.</span>}
-        {data.payment_status==="paid"&&!data.subscription_update_available&&<span className="billing-setup-note">Recurring price updates are unavailable until the PayFast subscription token and API credentials are configured.</span>}
+        {data.payment_status!=="paid"&&!data.checkout_available&&<span className="billing-setup-note">PayFast checkout is not enabled yet. The merchant account credentials must be configured before customers can pay.</span>}
+        {data.payment_status==="paid"&&data.subscription_price_out_of_sync&&!data.subscription_update_available&&<span className="billing-setup-note">Your recurring price needs updating, but PayFast API credentials are unavailable. The current provider amount has not been changed.</span>}
+        {data.payment_status==="paid"&&!data.subscription_price_out_of_sync&&<span className="billing-setup-note">Your recurring PayFast price is up to date.</span>}
       </div>
       <div className="billing-columns">
         <form className="finance-form" onSubmit={registerTerminal}>
