@@ -424,7 +424,7 @@ class PayFastPayment(Base):
     unit_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     referral_discount_applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending", index=True)
-    provider_subscription_token: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    provider_subscription_token: Mapped[str | None] = mapped_column(String(180), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
