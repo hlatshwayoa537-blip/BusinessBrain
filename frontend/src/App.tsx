@@ -199,7 +199,7 @@ function FinanceWorkspace({ session }: { session: AuthData }) {
       setMessage("Paid " + kind + " record created and linked. " + result.finance_record.amount + " " + result.finance_record.currency + " recorded.");
       setBankSuggestions(current => {const next={...current};delete next[row.id];return next;});
       await loadBankRows();
-      await load();
+      await loadFinance();
     } catch (err) { setError(err instanceof Error ? err.message : "Could not create finance record from bank row."); }
     finally { setBankBusy(false); }
   }
