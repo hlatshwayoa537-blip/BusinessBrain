@@ -406,12 +406,14 @@ def cancel_payfast_subscription(user: User = Depends(get_current_user), db: Sess
     if not settings.payfast_merchant_id or not settings.payfast_passphrase:
         raise HTTPException(status_code=503, detail="PayFast subscription API credentials are not configured.")
     try:
-        cancel_recurring_subscription(
+        confirmed = cancel_recurring_subscription(
             token=subscription.provider_subscription_reference,
             merchant_id=settings.payfast_merchant_id,
             passphrase=settings.payfast_passphrase,
             sandbox=settings.payfast_sandbox,
         )
+        if not confirmed:
+            raise ValueError("PayFast did not confirm subscription cancellation.")
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from None
     subscription.status = "cancelled"
