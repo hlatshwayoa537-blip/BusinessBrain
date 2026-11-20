@@ -97,3 +97,81 @@ def test_supplier_invoice_cannot_allocate_same_po_line_twice(client):
     payload["lines"].append(dict(payload["lines"][0]))
     response = client.post("/api/v1/supplier-invoices", headers=auth, json=payload)
     assert response.status_code == 422
+
+
+
+def test_approval_creates_payable_without_expense_or_inventory_posting(client):
+    auth = register(client, "supplier-payable-create@example.com", "Payable Create Store")
+    supplier_id, order_id, line_id = received_order(client, auth)
+    invoice = client.post("/api/v1/supplier-invoices", headers=auth, json=invoice_payload(supplier_id, order_id, line_id)).json()
+    approved = client.post(f"/api/v1/supplier-invoices/{invoice['id']}/approve", headers=auth, json={})
+    assert approved.status_code == 200, approved.text
+    payable = approved.json()["payable"]
+    assert payable["status"] == "open"
+    assert payable["total_amount"] == "115.00"
+    assert payable["amount_paid"] == "0.00"
+    assert payable["balance_due"] == "115.00"
+    assert payable["payments"] == []
+    assert client.get("/api/v1/finance/transactions?kind=expense", headers=auth).json() == []
+    assert [event["event_type"] for event in approved.json()["events"]][-1] == "approved"
+
+
+def test_supplier_payable_partial_and_full_payments_update_balance_once(client):
+    auth = register(client, "supplier-payable-payments@example.com", "Payable Payments Store")
+    supplier_id, order_id, line_id = received_order(client, auth)
+    invoice = client.post("/api/v1/supplier-invoices", headers=auth, json=invoice_payload(supplier_id, order_id, line_id)).json()
+    client.post(f"/api/v1/supplier-invoices/{invoice['id']}/approve", headers=auth, json={})
+    invoice_id = invoice["id"]
+    first_payload = {
+        "amount": "50.00", "payment_date": "2026-11-20", "payment_method": "eft",
+        "reference": "BANK-REF-1", "idempotency_key": "supplier-payment-001",
+    }
+    first = client.post(f"/api/v1/supplier-invoices/{invoice_id}/payments", headers=auth, json=first_payload)
+    assert first.status_code == 201, first.text
+    assert first.json()["payable"]["status"] == "partially_paid"
+    assert first.json()["payable"]["amount_paid"] == "50.00"
+    assert first.json()["payable"]["balance_due"] == "65.00"
+    replay = client.post(f"/api/v1/supplier-invoices/{invoice_id}/payments", headers=auth, json=first_payload)
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["replayed"] is True
+    assert replay.json()["payable"]["amount_paid"] == "50.00"
+    conflicting_replay = client.post(f"/api/v1/supplier-invoices/{invoice_id}/payments", headers=auth, json={
+        **first_payload, "amount": "51.00"
+    })
+    assert conflicting_replay.status_code == 409
+    second = client.post(f"/api/v1/supplier-invoices/{invoice_id}/payments", headers=auth, json={
+        "amount": "65.00", "payment_date": "2026-11-21", "payment_method": "cash",
+        "idempotency_key": "supplier-payment-002",
+    })
+    assert second.status_code == 201, second.text
+    assert second.json()["payable"]["status"] == "paid"
+    assert second.json()["payable"]["balance_due"] == "0.00"
+    assert len(second.json()["payable"]["payments"]) == 2
+
+
+def test_supplier_payable_rejects_overpayment_and_unapproved_invoice(client):
+    auth = register(client, "supplier-payable-overpay@example.com", "Payable Overpay Store")
+    supplier_id, order_id, line_id = received_order(client, auth)
+    invoice = client.post("/api/v1/supplier-invoices", headers=auth, json=invoice_payload(supplier_id, order_id, line_id)).json()
+    blocked = client.post(f"/api/v1/supplier-invoices/{invoice['id']}/payments", headers=auth, json={
+        "amount": "1.00", "payment_date": "2026-11-20", "idempotency_key": "supplier-payment-003"
+    })
+    assert blocked.status_code == 409
+    client.post(f"/api/v1/supplier-invoices/{invoice['id']}/approve", headers=auth, json={})
+    over = client.post(f"/api/v1/supplier-invoices/{invoice['id']}/payments", headers=auth, json={
+        "amount": "115.01", "payment_date": "2026-11-20", "idempotency_key": "supplier-payment-004"
+    })
+    assert over.status_code == 409
+
+
+def test_supplier_payables_are_tenant_scoped(client):
+    owner = register(client, "supplier-payable-owner@example.com", "Payable Owner")
+    other = register(client, "supplier-payable-other@example.com", "Payable Other")
+    supplier_id, order_id, line_id = received_order(client, owner)
+    invoice = client.post("/api/v1/supplier-invoices", headers=owner, json=invoice_payload(supplier_id, order_id, line_id)).json()
+    client.post(f"/api/v1/supplier-invoices/{invoice['id']}/approve", headers=owner, json={})
+    assert client.get("/api/v1/supplier-invoices/payables/list", headers=owner).json()[0]["balance_due"] == "115.00"
+    assert client.get("/api/v1/supplier-invoices/payables/list", headers=other).json() == []
+    assert client.post(f"/api/v1/supplier-invoices/{invoice['id']}/payments", headers=other, json={
+        "amount": "10.00", "payment_date": "2026-11-20", "idempotency_key": "supplier-payment-005"
+    }).status_code == 404

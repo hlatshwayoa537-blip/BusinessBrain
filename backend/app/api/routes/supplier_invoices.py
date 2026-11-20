@@ -13,7 +13,7 @@ from app.api.routes.auth import get_current_user
 from app.db import get_db
 from app.models import (
     Membership, PurchaseOrder, PurchaseOrderLine, Supplier, SupplierInvoice,
-    SupplierInvoiceEvent, SupplierInvoiceLine, User,
+    SupplierInvoiceEvent, SupplierInvoiceLine, SupplierInvoicePayable, SupplierInvoicePayment, User,
 )
 
 router = APIRouter(prefix="/supplier-invoices", tags=["supplier invoice matching"])
@@ -71,6 +71,15 @@ class SupplierInvoiceCreate(BaseModel):
 
 class ApprovalInput(BaseModel):
     override_reason: str | None = Field(default=None, min_length=8, max_length=1000)
+
+
+class SupplierPaymentCreate(BaseModel):
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    payment_date: date
+    payment_method: str = Field(default="manual", min_length=2, max_length=40)
+    reference: str | None = Field(default=None, max_length=100)
+    idempotency_key: str = Field(min_length=12, max_length=80)
+    notes: str | None = Field(default=None, max_length=1000)
 
 
 def add_event(db: Session, invoice: SupplierInvoice, user: User, event_type: str, details: dict) -> None:
@@ -177,8 +186,40 @@ def match_invoice(db: Session, invoice: SupplierInvoice, lines: list[SupplierInv
     }
 
 
+def payable_payload(payable: SupplierInvoicePayable, db: Session) -> dict:
+    payments = db.scalars(select(SupplierInvoicePayment).where(
+        SupplierInvoicePayment.payable_id == payable.id,
+        SupplierInvoicePayment.business_id == payable.business_id,
+    ).order_by(SupplierInvoicePayment.payment_date.asc(), SupplierInvoicePayment.created_at.asc())).all()
+    supplier = db.scalar(select(Supplier).where(
+        Supplier.id == payable.supplier_id, Supplier.business_id == payable.business_id,
+    ))
+    invoice = db.scalar(select(SupplierInvoice).where(
+        SupplierInvoice.id == payable.invoice_id, SupplierInvoice.business_id == payable.business_id,
+    ))
+    return {
+        "id": payable.id, "invoice_id": payable.invoice_id, "supplier_id": payable.supplier_id,
+        "supplier_name": supplier.name if supplier else "Supplier unavailable",
+        "supplier_reference": invoice.supplier_reference if invoice else "Invoice unavailable",
+        "currency": payable.currency, "total_amount": f"{Decimal(payable.total_amount):.2f}",
+        "amount_paid": f"{Decimal(payable.amount_paid):.2f}",
+        "balance_due": f"{Decimal(payable.balance_due):.2f}", "due_date": payable.due_date,
+        "status": payable.status, "created_at": payable.created_at, "updated_at": payable.updated_at,
+        "payments": [{
+            "id": p.id, "amount": f"{Decimal(p.amount):.2f}", "currency": p.currency,
+            "payment_date": p.payment_date, "payment_method": p.payment_method,
+            "reference": p.reference, "notes": p.notes, "recorded_by_user_id": p.recorded_by_user_id,
+            "created_at": p.created_at,
+        } for p in payments],
+    }
+
+
 def invoice_payload(invoice: SupplierInvoice, db: Session, include_events: bool = False) -> dict:
     supplier = db.scalar(select(Supplier).where(Supplier.id == invoice.supplier_id, Supplier.business_id == invoice.business_id))
+    payable = db.scalar(select(SupplierInvoicePayable).where(
+        SupplierInvoicePayable.invoice_id == invoice.id,
+        SupplierInvoicePayable.business_id == invoice.business_id,
+    ))
     lines = db.scalars(select(SupplierInvoiceLine).where(
         SupplierInvoiceLine.invoice_id == invoice.id,
         SupplierInvoiceLine.business_id == invoice.business_id,
@@ -194,6 +235,7 @@ def invoice_payload(invoice: SupplierInvoice, db: Session, include_events: bool 
         "status": invoice.status, "match_results": json.loads(invoice.match_results_json or "{}"),
         "notes": invoice.notes, "created_at": invoice.created_at,
         "approved_by_user_id": invoice.approved_by_user_id, "approved_at": invoice.approved_at,
+        "payable": payable_payload(payable, db) if payable else None,
         "lines": [{
             "id": line.id, "purchase_order_line_id": line.purchase_order_line_id,
             "description": line.description, "quantity": f"{Decimal(line.quantity):.3f}",
@@ -338,10 +380,116 @@ def approve_supplier_invoice(invoice_id: str, payload: ApprovalInput, db: Sessio
     invoice.approved_by_user_id = user.id
     invoice.approved_at = datetime.now(timezone.utc)
     invoice.updated_at = invoice.approved_at
+    payable = db.scalar(select(SupplierInvoicePayable).where(
+        SupplierInvoicePayable.invoice_id == invoice.id,
+        SupplierInvoicePayable.business_id == membership.business_id,
+    ).with_for_update())
+    if not payable:
+        payable = SupplierInvoicePayable(
+            id=str(uuid.uuid4()), business_id=membership.business_id, invoice_id=invoice.id,
+            supplier_id=invoice.supplier_id, currency=invoice.currency,
+            total_amount=invoice.total, amount_paid=ZERO, balance_due=invoice.total,
+            due_date=invoice.due_date, status="open",
+            created_at=invoice.approved_at, updated_at=invoice.approved_at,
+        )
+        db.add(payable)
     add_event(db, invoice, user, "approved_with_override" if flags else "approved", {
         "override_reason": reason or None, "overridden_flags": [f["code"] for f in flags],
-        "note": "Approval does not initiate payment or post an expense or inventory movement.",
+        "accounts_payable_created": True,
+        "note": "Approval creates an accounts-payable liability only. It does not record a payment, create an expense transaction, or post inventory. Goods received are already handled by the purchase-order receipt workflow.",
     })
     db.commit()
     db.refresh(invoice)
     return invoice_payload(invoice, db, include_events=True)
+
+
+
+@router.get("/payables/list")
+def list_supplier_payables(
+    status_filter: str | None = Query(default=None, alias="status", pattern=r"^(open|partially_paid|paid)$"),
+    db: Session = Depends(get_db), user: User = Depends(get_current_user),
+):
+    membership = membership_for(user, db)
+    stmt = select(SupplierInvoicePayable).where(
+        SupplierInvoicePayable.business_id == membership.business_id,
+    )
+    if status_filter:
+        stmt = stmt.where(SupplierInvoicePayable.status == status_filter)
+    rows = db.scalars(stmt.order_by(SupplierInvoicePayable.due_date.asc(), SupplierInvoicePayable.created_at.desc()).limit(500)).all()
+    return [payable_payload(row, db) for row in rows]
+
+
+@router.post("/{invoice_id}/payments", status_code=status.HTTP_201_CREATED)
+def record_supplier_invoice_payment(
+    invoice_id: str, payload: SupplierPaymentCreate,
+    db: Session = Depends(get_db), user: User = Depends(get_current_user),
+):
+    membership = membership_for(user, db)
+    require_manager(membership)
+    invoice = db.scalar(select(SupplierInvoice).where(
+        SupplierInvoice.id == invoice_id, SupplierInvoice.business_id == membership.business_id,
+    ).with_for_update())
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Supplier invoice not found.")
+    if invoice.status != "approved":
+        raise HTTPException(status_code=409, detail="Only approved supplier invoices can have payments recorded.")
+    payable = db.scalar(select(SupplierInvoicePayable).where(
+        SupplierInvoicePayable.invoice_id == invoice.id,
+        SupplierInvoicePayable.business_id == membership.business_id,
+    ).with_for_update())
+    if not payable:
+        raise HTTPException(status_code=409, detail="The approved invoice has no accounts-payable record.")
+    existing = db.scalar(select(SupplierInvoicePayment).where(
+        SupplierInvoicePayment.business_id == membership.business_id,
+        SupplierInvoicePayment.idempotency_key == payload.idempotency_key,
+    ))
+    if existing:
+        same_request = (
+            existing.invoice_id == invoice.id
+            and Decimal(existing.amount) == payload.amount
+            and existing.payment_date == payload.payment_date
+            and existing.payment_method == payload.payment_method.strip()
+            and existing.reference == (payload.reference.strip() if payload.reference else None)
+        )
+        if not same_request:
+            raise HTTPException(status_code=409, detail="This idempotency key was already used for a different payment.")
+        return {"payment": {
+            "id": existing.id, "amount": f"{Decimal(existing.amount):.2f}",
+            "payment_date": existing.payment_date, "reference": existing.reference,
+        }, "payable": payable_payload(payable, db), "replayed": True}
+    amount = payload.amount.quantize(CENT)
+    if amount <= ZERO:
+        raise HTTPException(status_code=422, detail="Payment amount must be at least one cent.")
+    balance = Decimal(payable.balance_due).quantize(CENT)
+    if amount > balance:
+        raise HTTPException(status_code=409, detail=f"Payment exceeds the outstanding balance of {balance:.2f}.")
+    payment = SupplierInvoicePayment(
+        id=str(uuid.uuid4()), business_id=membership.business_id, payable_id=payable.id,
+        invoice_id=invoice.id, amount=amount, currency=payable.currency,
+        payment_date=payload.payment_date, payment_method=payload.payment_method.strip(),
+        reference=payload.reference.strip() if payload.reference else None,
+        idempotency_key=payload.idempotency_key, notes=payload.notes,
+        recorded_by_user_id=user.id, created_at=datetime.now(timezone.utc),
+    )
+    payable.amount_paid = (Decimal(payable.amount_paid) + amount).quantize(CENT)
+    payable.balance_due = (Decimal(payable.total_amount) - Decimal(payable.amount_paid)).quantize(CENT)
+    payable.status = "paid" if payable.balance_due == ZERO else "partially_paid"
+    payable.updated_at = datetime.now(timezone.utc)
+    db.add(payment)
+    add_event(db, invoice, user, "payment_recorded", {
+        "payment_id": payment.id, "amount": f"{amount:.2f}", "currency": payable.currency,
+        "payment_date": payload.payment_date.isoformat(), "payment_method": payment.payment_method,
+        "reference": payment.reference, "remaining_balance": f"{Decimal(payable.balance_due):.2f}",
+        "note": "Manually recorded payment; not independently verified against a bank statement.",
+    })
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This payment idempotency key has already been used.")
+    db.refresh(payment)
+    db.refresh(payable)
+    return {"payment": {
+        "id": payment.id, "amount": f"{Decimal(payment.amount):.2f}",
+        "payment_date": payment.payment_date, "reference": payment.reference,
+    }, "payable": payable_payload(payable, db), "replayed": False}

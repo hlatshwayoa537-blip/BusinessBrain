@@ -634,3 +634,40 @@ class SupplierInvoiceEvent(Base):
     event_type: Mapped[str] = mapped_column(String(32), nullable=False)
     details_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class SupplierInvoicePayable(Base):
+    __tablename__ = "supplier_invoice_payables"
+    __table_args__ = (UniqueConstraint("invoice_id", name="uq_supplier_invoice_payable_invoice"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    invoice_id: Mapped[str] = mapped_column(ForeignKey("supplier_invoices.id", ondelete="RESTRICT"), nullable=False, index=True)
+    supplier_id: Mapped[str] = mapped_column(ForeignKey("suppliers.id", ondelete="RESTRICT"), nullable=False, index=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="ZAR")
+    total_amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    amount_paid: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    balance_due: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class SupplierInvoicePayment(Base):
+    __tablename__ = "supplier_invoice_payments"
+    __table_args__ = (
+        UniqueConstraint("business_id", "idempotency_key", name="uq_supplier_invoice_payment_idempotency"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    payable_id: Mapped[str] = mapped_column(ForeignKey("supplier_invoice_payables.id", ondelete="RESTRICT"), nullable=False, index=True)
+    invoice_id: Mapped[str] = mapped_column(ForeignKey("supplier_invoices.id", ondelete="RESTRICT"), nullable=False, index=True)
+    amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="ZAR")
+    payment_date: Mapped[date] = mapped_column(Date, nullable=False)
+    payment_method: Mapped[str] = mapped_column(String(40), nullable=False, default="manual")
+    reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recorded_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)

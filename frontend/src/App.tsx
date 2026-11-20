@@ -1283,6 +1283,55 @@ function SupplierInvoiceMatchingWorkspace({session}:{session:AuthData}) {
   </section>;
 }
 
+
+type SupplierPayable = {id:string;invoice_id:string;supplier_id:string;supplier_name:string;supplier_reference:string;currency:string;total_amount:string;amount_paid:string;balance_due:string;due_date:string|null;status:string;payments:{id:string;amount:string;payment_date:string;payment_method:string;reference:string|null}[]};
+function SupplierPayablesWorkspace({session}:{session:AuthData}) {
+  const [rows,setRows]=useState<SupplierPayable[]>([]);
+  const [amounts,setAmounts]=useState<Record<string,string>>({});
+  const [references,setReferences]=useState<Record<string,string>>({});
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const [message,setMessage]=useState("");
+  async function request(path:string,method="GET",body?:unknown) {
+    const response=await fetch(API_BASE+path,{method,headers:{Authorization:"Bearer "+session.access_token,...(body?{"Content-Type":"application/json"}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    const data=await response.json().catch(()=>null);
+    if(!response.ok)throw new Error(data?.detail||"Accounts payable request failed.");
+    return data;
+  }
+  async function refresh(){try{setRows(await request("/supplier-invoices/payables/list") as SupplierPayable[]);}catch(e){setError(e instanceof Error?e.message:"Could not load supplier payables.");}}
+  useEffect(()=>{void refresh();},[session.access_token]);
+  async function recordPayment(row:SupplierPayable){
+    const amount=amounts[row.invoice_id]||"";
+    if(!amount||Number(amount)<=0)return;
+    setBusy(true);setError("");setMessage("");
+    try{
+      const key=window.crypto?.randomUUID?.()||("vexion-"+Date.now()+"-"+Math.random().toString(36).slice(2));
+      const paymentDate=new Intl.DateTimeFormat("en-CA",{timeZone:"Africa/Johannesburg"}).format(new Date());
+      const result=await request("/supplier-invoices/"+row.invoice_id+"/payments","POST",{
+        amount:Number(amount),payment_date:paymentDate,payment_method:"manual",
+        reference:references[row.invoice_id]||null,idempotency_key:key
+      });
+      setMessage("Payment recorded. Outstanding balance: R "+result.payable.balance_due+". This is a manual record, not bank verification.");
+      setAmounts(current=>({...current,[row.invoice_id]:""}));await refresh();
+    }catch(e){setError(e instanceof Error?e.message:"Payment could not be recorded.");}
+    finally{setBusy(false);}
+  }
+  const money=(v:string)=>"R "+Number(v).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});
+  return <section className="finance-centre" id="supplier-payables">
+    <div className="profile-centre-heading"><div><div className="eyebrow">ACCOUNTS PAYABLE</div><h2>Know exactly what your business still owes.</h2><p>Approved supplier invoices become liabilities. Record full or partial payments and keep the remaining balance visible.</p></div><span className="profile-status">Payment ledger</span></div>
+    <p className="finance-alert">Payments entered here are manually recorded, not confirmed by your bank. This ledger does not automatically create expense entries or stock movements. Goods received remain recorded through the purchase-order receiving process.</p>
+    {error&&<p className="finance-alert" role="alert">{error}</p>}{message&&<p className="finance-success" role="status">{message}</p>}
+    <div className="finance-form"><div className="profile-centre-heading"><h3>Outstanding supplier balances</h3><button className="network-secondary-button" type="button" onClick={()=>void refresh()}>Refresh</button></div>
+    {!rows.length?<p className="network-empty">No approved supplier payables yet.</p>:rows.map(row=><article className="purchase-order-card" key={row.id}>
+      <div className="profile-centre-heading"><div><strong>{row.supplier_name} · {row.supplier_reference}</strong><p>{money(row.total_amount)} total · Due {row.due_date||"date not specified"} · Paid {money(row.amount_paid)}</p></div><span className="profile-status">{row.status.replaceAll("_"," ")}</span></div>
+      <h3>Outstanding: {money(row.balance_due)}</h3>
+      {row.payments.map(p=><p key={p.id}>Payment {money(p.amount)} · {p.payment_date} · {p.payment_method}{p.reference?" · "+p.reference:""}</p>)}
+      {row.status!=="paid"&&<div className="finance-toolbar"><label>Payment amount (R)<input type="number" min="0.01" max={row.balance_due} step="0.01" value={amounts[row.invoice_id]||""} onChange={e=>setAmounts(v=>({...v,[row.invoice_id]:e.target.value}))}/></label><label>Payment reference<input value={references[row.invoice_id]||""} onChange={e=>setReferences(v=>({...v,[row.invoice_id]:e.target.value}))} placeholder="Optional bank / cash reference"/></label><button className="network-primary-button" type="button" disabled={busy||!amounts[row.invoice_id]||Number(amounts[row.invoice_id])>Number(row.balance_due)} onClick={()=>void recordPayment(row)}>Record payment</button></div>}
+    </article>)}</div>
+  </section>;
+}
+
+
 export default function App() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
   const [session, setSession] = useState<AuthData | null>(readSession);
@@ -1740,6 +1789,7 @@ export default function App() {
       <InventoryWorkspace session={session} />
       <SupplierPurchasingWorkspace session={session} />
       <SupplierInvoiceMatchingWorkspace session={session} />
+      <SupplierPayablesWorkspace session={session} />
       <FinanceWorkspace session={session} />
       <section className="profile-centre" id="business-profile">
         <div className="profile-centre-heading"><div><div className="eyebrow">BUSINESS IDENTITY</div><h2>Business Profile & Onboarding</h2><p>Complete your business details. You control what information is shared publicly later.</p></div><span className="profile-status">Editable anytime</span></div>
