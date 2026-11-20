@@ -1,3 +1,7 @@
+from app.db import get_db
+from app.models import Business, Membership
+
+
 def registration_payload(email="founder@example.com"):
     return {"full_name":"Test Founder","email":email,"password":"A-strong-test-password-123","business_name":"Example Trading","industry":"Retail","country":"ZA"}
 
@@ -245,3 +249,48 @@ def test_deal_room_file_rejects_disallowed_type(client):
     room = client.post(f"/api/v1/network/conversations/{conversation['id']}/deal-room", headers=host_headers).json()
     response = client.post(f"/api/v1/network/deal-rooms/{room['id']}/files/upload-url", headers=host_headers, json={"filename": "malware.exe", "content_type": "application/octet-stream", "size_bytes": 100})
     assert response.status_code == 415
+
+
+
+def test_user_can_list_and_switch_only_their_business_workspaces(client):
+    registered = client.post("/api/v1/auth/register", json=registration_payload()).json()
+    headers = {"Authorization": f"Bearer {registered['access_token']}"}
+    db_generator = client.app.dependency_overrides[get_db]()
+    db = next(db_generator)
+    try:
+        second_business = Business(name="Second Trading", industry="Wholesale", country="ZA")
+        db.add(second_business)
+        db.flush()
+        db.add(Membership(user_id=registered["user"]["id"], business_id=second_business.id, role="manager"))
+        db.commit()
+        second_business_id = second_business.id
+    finally:
+        db_generator.close()
+
+    workspaces = client.get("/api/v1/auth/businesses", headers=headers)
+    assert workspaces.status_code == 200
+    assert len(workspaces.json()) == 2
+    assert sum(item["active"] for item in workspaces.json()) == 1
+
+    switched = client.post("/api/v1/auth/business/switch", headers=headers, json={"business_id": second_business_id})
+    assert switched.status_code == 200
+    switched_headers = {"Authorization": f"Bearer {switched.json()['access_token']}"}
+    profile = client.get("/api/v1/auth/business/profile", headers=switched_headers)
+    assert profile.status_code == 200
+    assert profile.json()["name"] == "Second Trading"
+
+    original_profile = client.get("/api/v1/auth/business/profile", headers=headers)
+    assert original_profile.status_code == 200
+    assert original_profile.json()["name"] == "Example Trading"
+
+
+def test_user_cannot_switch_to_an_unrelated_business(client):
+    registered = client.post("/api/v1/auth/register", json=registration_payload()).json()
+    outsider = client.post("/api/v1/auth/register", json=registration_payload("outsider@example.com")).json()
+    headers = {"Authorization": f"Bearer {registered['access_token']}"}
+    response = client.post(
+        "/api/v1/auth/business/switch",
+        headers=headers,
+        json={"business_id": outsider["business"]["id"]},
+    )
+    assert response.status_code == 403
