@@ -1389,6 +1389,14 @@ export default function App() {
   const [businessWorkspaces, setBusinessWorkspaces] = useState<BusinessWorkspace[]>([]);
   const [workspaceSwitchBusy, setWorkspaceSwitchBusy] = useState(false);
   const [mode, setMode] = useState<"register" | "login">("register");
+  const [recoveryToken, setRecoveryToken] = useState(() => new URLSearchParams(window.location.search).get("reset_token") ?? "");
+  const [recoveryMode, setRecoveryMode] = useState<"none" | "request" | "reset">(() => new URLSearchParams(window.location.search).get("reset_token") ? "reset" : "none");
+  const [recoveryEmail, setRecoveryEmail] = useState("");
+  const [recoveryPassword, setRecoveryPassword] = useState("");
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryMessage, setRecoveryMessage] = useState("");
+  const [recoveryError, setRecoveryError] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [fullName, setFullName] = useState("");
@@ -1764,6 +1772,41 @@ export default function App() {
     }
   }
 
+
+  async function requestPasswordReset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setRecoveryBusy(true); setRecoveryError(""); setRecoveryMessage("");
+    try {
+      const response = await fetch(API_BASE + "/auth/password-reset/request", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: recoveryEmail }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Password reset could not be requested.");
+      setRecoveryMessage(data.message || "If an active account exists, reset instructions will be sent.");
+    } catch (err) {
+      setRecoveryError(err instanceof Error ? err.message : "Password reset could not be requested.");
+    } finally { setRecoveryBusy(false); }
+  }
+
+  async function confirmPasswordReset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setRecoveryBusy(true); setRecoveryError(""); setRecoveryMessage("");
+    try {
+      const response = await fetch(API_BASE + "/auth/password-reset/confirm", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: recoveryToken, new_password: recoveryPassword }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "This reset link could not be used.");
+      setAuthNotice("Your password has been reset. Sign in with your new password.");
+      setRecoveryPassword(""); setRecoveryToken(""); setRecoveryMode("none"); setMode("login");
+      window.history.replaceState({}, "", "/");
+    } catch (err) {
+      setRecoveryError(err instanceof Error ? err.message : "This reset link could not be used.");
+    } finally { setRecoveryBusy(false); }
+  }
+
   function updateProfileField(field: keyof BusinessProfile, value: string) {
     setProfileDraft(current => ({ ...current, [field]: value }));
   }
@@ -1832,6 +1875,35 @@ export default function App() {
 
   if (window.location.pathname === "/careers" || window.location.pathname === "/jobs") return <PublicCareers />;
 
+  if (!session && recoveryMode === "request") return <div className="auth-page">
+    <div className="auth-brand"><div className="brand-mark"><Activity size={22}/></div><span>VEXION</span></div>
+    <section className="auth-card auth-recovery-card">
+      <div className="auth-card-heading"><h2>Reset your password</h2><p>Enter your business email and we’ll send a secure reset link if an active account exists.</p></div>
+      <form className="auth-form" onSubmit={requestPasswordReset}>
+        <label>Business email<input required type="email" maxLength={320} autoComplete="email" value={recoveryEmail} onChange={e=>setRecoveryEmail(e.target.value)} placeholder="you@company.com"/></label>
+        {recoveryError && <div className="auth-error" role="alert">{recoveryError}</div>}
+        {recoveryMessage && <div className="auth-success" role="status">{recoveryMessage}</div>}
+        <button className="auth-submit" type="submit" disabled={recoveryBusy || apiStatus !== "online"}>{recoveryBusy ? "Sending…" : "Send secure reset link"} <ArrowUpRight size={17}/></button>
+      </form>
+      <button type="button" className="auth-link" onClick={()=>{setRecoveryMode("none");setRecoveryError("");setRecoveryMessage("");}}>Back to sign in</button>
+      <div className="auth-footnote"><LockKeyhole size={14}/> Reset links expire after 30 minutes and can only be used once.</div>
+    </section>
+  </div>;
+
+  if (!session && recoveryMode === "reset") return <div className="auth-page">
+    <div className="auth-brand"><div className="brand-mark"><Activity size={22}/></div><span>VEXION</span></div>
+    <section className="auth-card auth-recovery-card">
+      <div className="auth-card-heading"><h2>Create a new password</h2><p>Choose a strong password with at least 12 characters.</p></div>
+      <form className="auth-form" onSubmit={confirmPasswordReset}>
+        <label>New password<input required type="password" minLength={12} maxLength={128} autoComplete="new-password" value={recoveryPassword} onChange={e=>setRecoveryPassword(e.target.value)} placeholder="At least 12 characters"/></label>
+        {recoveryError && <div className="auth-error" role="alert">{recoveryError}</div>}
+        <button className="auth-submit" type="submit" disabled={recoveryBusy || !recoveryToken || apiStatus !== "online"}>{recoveryBusy ? "Updating…" : "Update password"} <ArrowUpRight size={17}/></button>
+      </form>
+      <button type="button" className="auth-link" onClick={()=>{setRecoveryMode("none");setRecoveryToken("");window.history.replaceState({}, "", "/");}}>Back to sign in</button>
+      <div className="auth-footnote"><LockKeyhole size={14}/> Your other signed-in sessions will be revoked.</div>
+    </section>
+  </div>;
+
   if (!session) return <div className="auth-page">
     <div className="auth-brand"><div className="brand-mark"><Activity size={22}/></div><span>VEXION</span></div>
     <div className="auth-layout">
@@ -1850,6 +1922,8 @@ export default function App() {
           <label>Password<input required type="password" minLength={mode === "register" ? 12 : 1} maxLength={128} autoComplete={mode === "register" ? "new-password" : "current-password"} value={password} onChange={e=>setPassword(e.target.value)} placeholder={mode === "register" ? "At least 12 characters" : "Your password"}/></label>
           {mode === "register" && <><label>Business name<input required minLength={2} maxLength={200} value={businessName} onChange={e=>setBusinessName(e.target.value)} placeholder="Your registered or trading name"/></label><label>Referral code (optional)<input maxLength={20} value={referralCode} onChange={e=>setReferralCode(e.target.value.toUpperCase())} placeholder="Enter a VEXION referral code"/></label><div className="profile-upload"><div className="profile-upload-preview">{profileImage ? <img src={profileImage} alt="Business profile preview"/> : <Building2 size={25}/>}</div><div className="profile-upload-copy"><strong>Business profile picture</strong><span>Add your company logo or business photo. Optional.</span><label className="profile-upload-button">{profileImage ? "Change image" : "Upload image"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>handleProfileImage(e.target.files?.[0])}/></label>{imageError && <small className="profile-upload-error">{imageError}</small>}</div></div><div className="auth-two-col"><label>Industry<input required minLength={2} maxLength={120} value={industry} onChange={e=>setIndustry(e.target.value)} placeholder="e.g. Retail"/></label><label>Country<select value={country} onChange={e=>setCountry(e.target.value)}><option value="ZA">South Africa</option><option value="NG">Nigeria</option><option value="KE">Kenya</option><option value="GH">Ghana</option><option value="BW">Botswana</option><option value="ZM">Zambia</option><option value="ZW">Zimbabwe</option><option value="OT">Other</option></select></label></div></>}
           {error && <div className="auth-error" role="alert">{error}</div>}
+          {authNotice && <div className="auth-success" role="status">{authNotice}</div>}
+          {mode === "login" && <button type="button" className="auth-link" onClick={()=>{setRecoveryEmail(email.includes("@") ? email : "");setRecoveryMode("request");setRecoveryError("");setRecoveryMessage("");setAuthNotice("");}}>Forgot your password?</button>}
           {apiStatus === "offline" && <div className="auth-warning">The VEXION API is not reachable yet. Check that the backend is running and try again.</div>}
           <button className="auth-submit" type="submit" disabled={busy || apiStatus !== "online"}>{busy ? "Please wait…" : mode === "register" ? "Create business workspace" : "Sign in securely"} <ArrowUpRight size={17}/></button>
         </form>
