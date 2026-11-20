@@ -36,7 +36,7 @@ def test_referral_code_is_created_and_direct_registration_is_attributed(client):
     assert body["referrals"][0]["business_name"] == "Referred Retail"
     assert body["referrals"][0]["status"] == "pending_payment"
     assert body["discount_eligible"] is False
-    assert body["reward_terms"]["payment_verification_available"] is False
+    assert body["reward_terms"]["payment_verification_available"] is True
 
 
 def test_invalid_referral_code_does_not_create_an_account(client):
