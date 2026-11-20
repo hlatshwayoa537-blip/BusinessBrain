@@ -1389,8 +1389,8 @@ export default function App() {
   const [businessWorkspaces, setBusinessWorkspaces] = useState<BusinessWorkspace[]>([]);
   const [workspaceSwitchBusy, setWorkspaceSwitchBusy] = useState(false);
   const [mode, setMode] = useState<"register" | "login">("register");
-  const [recoveryToken, setRecoveryToken] = useState(() => new URLSearchParams(window.location.search).get("reset_token") ?? "");
-  const [recoveryMode, setRecoveryMode] = useState<"none" | "request" | "reset">(() => new URLSearchParams(window.location.search).get("reset_token") ? "reset" : "none");
+  const [recoveryToken, setRecoveryToken] = useState(() => new URLSearchParams(window.location.hash.replace(/^#/, "")).get("reset_token") ?? "");
+  const [recoveryMode, setRecoveryMode] = useState<"none" | "request" | "reset">(() => new URLSearchParams(window.location.hash.replace(/^#/, "")).get("reset_token") ? "reset" : "none");
   const [recoveryEmail, setRecoveryEmail] = useState("");
   const [recoveryPassword, setRecoveryPassword] = useState("");
   const [recoveryBusy, setRecoveryBusy] = useState(false);
