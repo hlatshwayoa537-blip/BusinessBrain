@@ -414,6 +414,7 @@ async def receive_payfast_itn(request: Request, db: Session = Depends(get_db)) -
 
     existing_charge = db.scalar(select(PayFastCharge).where(
         PayFastCharge.pf_payment_id == provider_payment_id,
+        PayFastCharge.payment_status == payment_status,
     ))
     if existing_charge:
         return {"status": "accepted", "duplicate": True}
@@ -432,7 +433,7 @@ async def receive_payfast_itn(request: Request, db: Session = Depends(get_db)) -
             raise HTTPException(status_code=409, detail="Subscription record is unavailable.")
         if subscription.provider_subscription_reference and subscription.provider_subscription_reference != subscription_token:
             raise HTTPException(status_code=409, detail="PayFast subscription token does not match this payment.")
-        if payment.status == "verified" and payment.pf_payment_id == provider_payment_id:
+        if payment_status == "COMPLETE" and payment.status == "verified" and payment.pf_payment_id == provider_payment_id:
             return {"status": "accepted", "duplicate": True}
     else:
         subscription = db.scalar(select(BusinessSubscription).where(
