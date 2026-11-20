@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.api.business_context import get_business_membership
 from app.api.routes.auth import get_current_user
 from app.db import get_db
-from app.models import BusinessReferral, BusinessSubscription, BusinessPOSTerminal, Membership, POSConnection, POSTransaction, User, PayFastPayment
+from app.models import BusinessReferral, BusinessSubscription, BusinessPOSTerminal, Membership, POSConnection, POSTransaction, User, PayFastCharge, PayFastPayment
 from app.core.config import settings
 from app.services.payfast import build_subscription_checkout, update_recurring_subscription_amount, verify_itn_signature
 
@@ -280,6 +280,9 @@ def create_payfast_checkout(user: User = Depends(get_current_user), db: Session 
         db.flush()
     if subscription.status == "active" and subscription.provider_subscription_reference:
         raise HTTPException(status_code=409, detail="This business already has an active PayFast subscription.")
+    if subscription.status in {"cancelled", "failed"}:
+        subscription.provider_subscription_reference = None
+        subscription.provider_customer_reference = None
     subscription.status = "pending"
     subscription.payment_provider = "payfast"
     subscription.active_pos_count = terminal_count
@@ -404,8 +407,10 @@ async def receive_payfast_itn(request: Request, db: Session = Depends(get_db)) -
     if not data.get("item_name", "").strip():
         raise HTTPException(status_code=400, detail="PayFast item name is missing.")
     subscription_token = data.get("token", "").strip()
-    if len(subscription_token) != 36:
-        raise HTTPException(status_code=400, detail="PayFast subscription token is missing or invalid.")
+    try:
+        uuid.UUID(subscription_token)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="PayFast subscription token is missing or invalid.") from None
 
     existing_charge = db.scalar(select(PayFastCharge).where(
         PayFastCharge.pf_payment_id == provider_payment_id,
@@ -439,12 +444,22 @@ async def receive_payfast_itn(request: Request, db: Session = Depends(get_db)) -
 
     now = datetime.now(timezone.utc)
     if payment_status == "CANCELLED":
+        # A delayed cancellation from a previously active token must not cancel a
+        # fresh checkout that is already pending for a new subscription token.
+        old_token_during_reactivation = bool(
+            payment and payment.status == "verified"
+            and subscription.status == "pending"
+            and not subscription.provider_subscription_reference
+        )
         if payment and payment.status in {"pending", "failed"}:
             payment.status = "cancelled"
             payment.provider_subscription_token = subscription_token
-        subscription.status = "cancelled"
-        subscription.payment_provider = "payfast"
-        subscription.provider_subscription_reference = subscription_token
+        elif payment and not payment.provider_subscription_token:
+            payment.provider_subscription_token = subscription_token
+        if not old_token_during_reactivation:
+            subscription.status = "cancelled"
+            subscription.payment_provider = "payfast"
+            subscription.provider_subscription_reference = subscription_token
         referral = db.scalar(select(BusinessReferral).where(
             BusinessReferral.referred_business_id == subscription.business_id,
         ))
@@ -492,9 +507,9 @@ async def receive_payfast_itn(request: Request, db: Session = Depends(get_db)) -
         # Subsequent monthly charges are identified by the PayFast subscription
         # token. m_payment_id is optional in PayFast's ITN contract.
         if not subscription.provider_subscription_reference:
-            # Recover subscriptions activated before token persistence was enforced,
-            # but only when the merchant payment reference identifies that record.
-            if not payment or payment.status != "verified":
+            # Recover legacy active subscriptions that were activated before token
+            # persistence was enforced. Never recover an old token during reactivation.
+            if not payment or payment.status != "verified" or subscription.status != "active":
                 raise HTTPException(status_code=409, detail="PayFast subscription token is not linked to an active subscription.")
             subscription.provider_subscription_reference = subscription_token
             subscription.payment_provider = "payfast"
