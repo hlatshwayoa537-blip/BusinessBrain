@@ -221,3 +221,57 @@ def test_payfast_itn_rejects_invalid_signature(client, monkeypatch):
     )
     assert response.status_code == 400
     assert "signature" in response.json()["detail"].lower()
+
+
+def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
+    from urllib.parse import urlencode
+    from app.core.config import settings
+    from app.services.payfast import generate_signature
+    import app.api.routes.billing as billing_routes
+
+    headers = register_owner(client, "payfast-verified@example.com")
+    client.post("/api/v1/billing/terminals", headers=headers, json={
+        "external_terminal_id": "PF-VERIFIED-01", "display_name": "Verified till"
+    })
+    monkeypatch.setattr(settings, "payfast_merchant_id", "10000100")
+    monkeypatch.setattr(settings, "payfast_merchant_key", "merchant-key")
+    monkeypatch.setattr(settings, "payfast_passphrase", "test-pass")
+    monkeypatch.setattr(settings, "payfast_sandbox", True)
+    checkout = client.post("/api/v1/billing/payfast/checkout", headers=headers)
+    assert checkout.status_code == 200
+    payment_reference = checkout.json()["payment_reference"]
+
+    monkeypatch.setattr(billing_routes, "_payfast_source_allowed", lambda _address: True)
+    monkeypatch.setattr(billing_routes, "_confirm_payfast_itn", lambda _body, _sandbox: True)
+    fields = {
+        "merchant_id": "10000100",
+        "m_payment_id": payment_reference,
+        "pf_payment_id": "sandbox-provider-payment-1",
+        "payment_status": "COMPLETE",
+        "item_name": "VEXION monthly subscription",
+        "amount_gross": "499.00",
+        "amount_fee": "0.00",
+        "amount_net": "499.00",
+        "currency": "ZAR",
+        "token": "sandbox-subscription-token",
+    }
+    signature = generate_signature(fields, "test-pass", fields.keys())
+    payload = urlencode({**fields, "signature": signature})
+    notification = client.post(
+        "/api/v1/billing/payfast/itn",
+        content=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert notification.status_code == 200
+    assert notification.json()["payment_status"] == "verified"
+    overview = client.get("/api/v1/billing/me", headers=headers).json()
+    assert overview["subscription_status"] == "active"
+    assert overview["payment_status"] == "paid"
+
+    duplicate = client.post(
+        "/api/v1/billing/payfast/itn",
+        content=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert duplicate.status_code == 200
+    assert duplicate.json()["duplicate"] is True
