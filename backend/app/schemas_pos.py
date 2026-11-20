@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Literal
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 IntegrationMethod = Literal["api", "webhook", "local_agent"]
 TransactionType = Literal["sale", "refund", "void"]
@@ -60,6 +60,13 @@ class POSIngestTransaction(BaseModel):
     transaction_type: TransactionType
     occurred_at: datetime
     currency: Annotated[str, StringConstraints(pattern=r"^[A-Za-z]{3}$")] = "ZAR"
+
+    @field_validator("occurred_at")
+    @classmethod
+    def require_timezone_offset(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("occurred_at must include an explicit timezone offset")
+        return value
     gross_amount: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
     discount_amount: Decimal = Field(default=Decimal("0"), ge=0, max_digits=14, decimal_places=2)
     tax_amount: Decimal = Field(default=Decimal("0"), ge=0, max_digits=14, decimal_places=2)
