@@ -388,7 +388,7 @@ def test_bank_statement_rejects_non_zar_currency_until_matching_supports_it(clie
     response = client.post(
         "/api/v1/bank-reconciliation/imports?account_label=Foreign%20Currency%20Account",
         headers={**auth_headers(owner), "Content-Type": "text/csv"},
-        content="date,description,amount,currency\\n2026-11-19,Foreign transfer,100.00,USD\\n",
+        content="date,description,amount,currency\n2026-11-19,Foreign transfer,100.00,USD\n",
     )
     assert response.status_code == 422
     assert "ZAR statements only" in response.json()["detail"]
@@ -401,7 +401,7 @@ def test_bank_statement_rejects_non_finite_running_balance(client):
         response = client.post(
             "/api/v1/bank-reconciliation/imports?account_label=Operating%20Account",
             headers={**auth_headers(owner), "Content-Type": "text/csv"},
-            content=f"date,description,amount,balance\\n2026-11-19,Card settlement,100.00,{invalid_balance}\\n",
+            content=f"date,description,amount,balance\n2026-11-19,Card settlement,100.00,{invalid_balance}\n",
         )
         assert response.status_code == 422
         assert "finite bank value" in response.json()["detail"]
@@ -413,7 +413,7 @@ def test_bank_statement_rejects_amounts_with_more_than_two_decimal_places(client
     response = client.post(
         "/api/v1/bank-reconciliation/imports?account_label=Operating%20Account",
         headers={**auth_headers(owner), "Content-Type": "text/csv"},
-        content="date,description,amount,balance\\n2026-11-19,Card settlement,100.001,500.00\\n",
+        content="date,description,amount,balance\n2026-11-19,Card settlement,100.001,500.00\n",
     )
     assert response.status_code == 422
     assert "two decimal places" in response.json()["detail"]
