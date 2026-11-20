@@ -3,7 +3,7 @@
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0031_pos_external_refund_references"
+revision = "0031_pos_refund_refs"
 down_revision = "0030_payfast_payments"
 branch_labels = None
 depends_on = None
