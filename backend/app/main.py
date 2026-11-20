@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 from pathlib import Path
 
 from alembic import command
@@ -31,6 +32,8 @@ from app.api.routes.billing import router as billing_router
 from app.api.routes.bank_reconciliation import router as bank_reconciliation_router
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -41,7 +44,11 @@ async def lifespan(app: FastAPI):
     if settings.app_env.lower() != "test":
         backend_dir = Path(__file__).resolve().parents[1]
         alembic_config = Config(str(backend_dir / "alembic.ini"))
-        command.upgrade(alembic_config, "head")
+        try:
+            command.upgrade(alembic_config, "head")
+        except Exception:
+            logger.exception("Database schema migration failed during API startup")
+            raise
     yield
 
 
