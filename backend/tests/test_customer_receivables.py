@@ -15,6 +15,8 @@ def make_invoice(client, auth, status="sent"):
     })
     assert created.status_code == 201, created.text
     invoice = created.json()
+    if status == "draft":
+        return invoice
     sent = client.patch(f"/api/v1/invoices/{invoice['id']}/status", headers=auth, json={"status": status})
     assert sent.status_code == 200
     return sent.json()
