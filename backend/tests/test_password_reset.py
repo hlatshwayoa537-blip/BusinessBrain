@@ -6,6 +6,9 @@ from app.api.routes import auth as auth_routes
 def test_password_reset_is_one_time_and_revokes_existing_access_tokens(client, monkeypatch):
     monkeypatch.setattr(auth_routes.settings, "smtp_host", "smtp.example.co.za")
     monkeypatch.setattr(auth_routes.settings, "smtp_from_email", "no-reply@example.co.za")
+    monkeypatch.setattr(auth_routes.settings, "app_env", "production")
+    monkeypatch.setattr(auth_routes.settings, "frontend_base_url", "http://localhost:5173")
+    monkeypatch.setattr(auth_routes.settings, "frontend_origins", "https://businessbrain-web.onrender.com")
     sent = []
 
     def fake_send(email, full_name, reset_url):
@@ -20,6 +23,7 @@ def test_password_reset_is_one_time_and_revokes_existing_access_tokens(client, m
     assert request.status_code == 202
     assert request.json()["message"].startswith("If an active account exists")
     assert sent[0]["email"] == "founder@example.com"
+    assert urlparse(sent[0]["reset_url"]).netloc == "businessbrain-web.onrender.com"
     raw_token = parse_qs(urlparse(sent[0]["reset_url"]).query)["reset_token"][0]
     assert len(raw_token) >= 32
 
