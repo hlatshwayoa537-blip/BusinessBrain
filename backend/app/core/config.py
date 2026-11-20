@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from_email: str = ""
     smtp_use_tls: bool = True
+    payfast_merchant_id: str = ""
+    payfast_merchant_key: str = ""
+    payfast_passphrase: str = ""
+    payfast_sandbox: bool = True
 
     @field_validator("database_url", mode="before")
     @classmethod
