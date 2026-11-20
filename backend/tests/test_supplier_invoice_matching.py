@@ -135,6 +135,10 @@ def test_supplier_payable_partial_and_full_payments_update_balance_once(client):
     assert replay.status_code == 201, replay.text
     assert replay.json()["replayed"] is True
     assert replay.json()["payable"]["amount_paid"] == "50.00"
+    conflicting_replay = client.post(f"/api/v1/supplier-invoices/{invoice_id}/payments", headers=auth, json={
+        **first_payload, "amount": "51.00"
+    })
+    assert conflicting_replay.status_code == 409
     second = client.post(f"/api/v1/supplier-invoices/{invoice_id}/payments", headers=auth, json={
         "amount": "65.00", "payment_date": "2026-11-21", "payment_method": "cash",
         "idempotency_key": "supplier-payment-002",
@@ -166,8 +170,8 @@ def test_supplier_payables_are_tenant_scoped(client):
     supplier_id, order_id, line_id = received_order(client, owner)
     invoice = client.post("/api/v1/supplier-invoices", headers=owner, json=invoice_payload(supplier_id, order_id, line_id)).json()
     client.post(f"/api/v1/supplier-invoices/{invoice['id']}/approve", headers=owner, json={})
-    assert client.get("/api/v1/supplier-invoices/payables", headers=owner).json()[0]["balance_due"] == "115.00"
-    assert client.get("/api/v1/supplier-invoices/payables", headers=other).json() == []
+    assert client.get("/api/v1/supplier-invoices/payables/list", headers=owner).json()[0]["balance_due"] == "115.00"
+    assert client.get("/api/v1/supplier-invoices/payables/list", headers=other).json() == []
     assert client.post(f"/api/v1/supplier-invoices/{invoice['id']}/payments", headers=other, json={
         "amount": "10.00", "payment_date": "2026-11-20", "idempotency_key": "supplier-payment-005"
     }).status_code == 404
