@@ -360,5 +360,14 @@ async def receive_payfast_itn(request: Request, db: Session = Depends(get_db)) -
     subscription.active_pos_count = payment.terminal_count
     subscription.referral_discount_applied = payment.referral_discount_applied
     subscription.updated_at = datetime.now(timezone.utc)
+    # A referred business only qualifies its referrer after its own subscription
+    # payment has been independently verified by PayFast. Keep this in the same
+    # transaction as activation so the reward cannot be granted on a partial write.
+    referral = db.scalar(select(BusinessReferral).where(
+        BusinessReferral.referred_business_id == payment.business_id,
+    ))
+    if referral and referral.status != "payment_verified":
+        referral.status = "payment_verified"
     db.commit()
-    return {"status": "accepted", "payment_status": "verified"}
+    return {"status": "accepted", "payment_status": "verified",
+            "referral_payment_verified": bool(referral)}
