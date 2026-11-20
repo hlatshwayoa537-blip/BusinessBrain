@@ -21,6 +21,9 @@ A feature is not release-approved solely because its pull request merged, CI pas
 | POS ingestion | Ready | Generic normalized transaction ingestion, webhook authentication, idempotency, terminal discovery and mapped CSV import exist. |
 | Named POS provider integrations | Needs external access | No named vendor adapter has been proven against a live POS provider. Do not claim a vendor is integrated until its adapter and real feed are tested. |
 | Daily Business Close | Ready | Close and reconciliation workflows are implemented with automated coverage. Verify calculations against real till close reports before pilot sign-off. |
+| Invoices | Ready | Invoice creation, VAT/tax calculations and status tracking are implemented in the workspace. PDF generation, email delivery, payment links and credit notes are not included yet. |
+| Customers & CRM | Needs fixing | There is no complete customer relationship management module; customer records used by receivables are not a full CRM. |
+| AI Business Manager | Needs fixing | The dashboard correctly marks this module as planned. No AI assistant API route or model-provider integration is present yet, so grounded natural-language business Q&A is not available. |
 | Discrepancy management | Ready | Case creation, assignment, status changes, notes and supporting evidence workflows exist. Wording remains neutral: a discrepancy is not proof of wrongdoing. |
 | Deal Room document uploads | Ready | Private upload, content validation, malware scan and clean-file promotion are implemented. PR #73 adds content-signature validation and checks the promoted object before it becomes available. |
 | Private object storage and malware scanning | Needs external access | The code supports S3-compatible storage and ClamAV. Production bucket credentials, private access policy, CORS, scanner connectivity and provider-side lifecycle rules must be configured and tested. |
