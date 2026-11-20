@@ -78,9 +78,11 @@ def list_business_activity(
     events: list[dict] = []
 
     def in_range(timestamp: datetime) -> bool:
-        if start_at and timestamp < start_at:
+        # SQLite may return naive datetimes in tests; production timestamps are UTC.
+        comparable = timestamp if timestamp.tzinfo else timestamp.replace(tzinfo=timezone.utc)
+        if start_at and comparable < start_at:
             return False
-        if end_at and timestamp >= end_at:
+        if end_at and comparable >= end_at:
             return False
         return True
 
