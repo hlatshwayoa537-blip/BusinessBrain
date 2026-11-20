@@ -140,3 +140,38 @@ def test_billing_discovers_terminals_from_csv_imported_pos_data(client):
     assert overview.status_code == 200
     assert overview.json()["active_pos_terminals"] == 1
     assert overview.json()["terminals"][0]["source"] == "connected_pos_feed"
+
+def test_discovery_does_not_reactivate_a_manually_deactivated_terminal(client):
+    headers = register_owner(client, "billing-discovery-deactivated@example.com")
+    connection = client.post("/api/v1/pos/connections", headers=headers, json={
+        "provider_name": "Generic POS", "display_name": "Store POS", "integration_method": "webhook"
+    }).json()
+    payload = {
+        "external_transaction_id": "DEACTIVATE-01",
+        "occurred_at": "2026-11-17T10:00:00+02:00",
+        "currency": "ZAR", "gross_amount": "100.00", "discount_amount": "0.00",
+        "tax_amount": "0.00", "net_amount": "100.00", "payment_method": "card",
+        "transaction_type": "sale", "branch_name": "Durban", "till_name": "Front till",
+    }
+    ingested = client.post(
+        f"/api/v1/pos/ingest/{connection['id']}",
+        headers={"X-Vexion-Secret": connection["webhook_secret"]},
+        json=payload,
+    )
+    assert ingested.status_code == 201
+
+    first = client.get("/api/v1/billing/me", headers=headers).json()
+    discovered = next(row for row in first["terminals"] if row["source"] == "connected_pos_feed")
+    disabled = client.patch(
+        f"/api/v1/billing/terminals/{discovered['id']}",
+        headers=headers,
+        json={"status": "inactive"},
+    )
+    assert disabled.status_code == 200
+
+    refreshed = client.get("/api/v1/billing/me", headers=headers).json()
+    terminal = next(row for row in refreshed["terminals"] if row["id"] == discovered["id"])
+    assert terminal["status"] == "inactive"
+    assert refreshed["active_pos_terminals"] == 0
+    assert refreshed["inactive_pos_terminals"] == 1
+    assert refreshed["estimated_monthly_total"] == "0.00"
