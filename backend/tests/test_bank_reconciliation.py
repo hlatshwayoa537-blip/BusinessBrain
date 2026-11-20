@@ -255,3 +255,60 @@ def test_pos_settlement_batch_cannot_reuse_source_or_cross_business(client):
         headers=auth_headers(other),
     )
     assert denied.status_code == 404
+
+
+def test_supplier_payment_exact_bank_match_and_duplicate_protection(client):
+    owner = register(client, "bank-supplier-payment@example.com", "Supplier Bank Match Owner", "Supplier Bank Match Shop")
+    headers = auth_headers(owner)
+    supplier = client.post("/api/v1/procurement/suppliers", headers=headers, json={"name": "Verified Supplier"}).json()
+    order = client.post("/api/v1/procurement/purchase-orders", headers=headers, json={
+        "supplier_id": supplier["id"],
+        "lines": [{"description": "Stock", "quantity": "10", "unit_price": "10.00", "tax_rate": "15"}],
+    }).json()
+    submitted = client.post(f"/api/v1/procurement/purchase-orders/{order['id']}/submit", headers=headers).json()
+    line_id = submitted["lines"][0]["id"]
+    received = client.post(f"/api/v1/procurement/purchase-orders/{order['id']}/receive", headers=headers, json={
+        "lines": [{"line_id": line_id, "quantity": "10"}], "idempotency_key": "bank-payable-receipt-001",
+    })
+    assert received.status_code == 200
+    invoice = client.post("/api/v1/supplier-invoices", headers=headers, json={
+        "supplier_id": supplier["id"], "purchase_order_id": order["id"],
+        "supplier_reference": "SUP-BANK-001", "invoice_date": "2026-11-19",
+        "due_date": "2026-12-19", "currency": "ZAR",
+        "stated_subtotal": "100.00", "stated_tax_total": "15.00", "stated_total": "115.00",
+        "lines": [{"description": "Stock", "quantity": "10", "unit_price": "10.00",
+                   "tax_rate": "15", "purchase_order_line_id": line_id}],
+    }).json()
+    approved = client.post(f"/api/v1/supplier-invoices/{invoice['id']}/approve", headers=headers, json={})
+    assert approved.status_code == 200
+    payment = client.post(f"/api/v1/supplier-invoices/{invoice['id']}/payments", headers=headers, json={
+        "amount": "115.00", "payment_date": "2026-11-20", "payment_method": "eft",
+        "reference": "EFT-SUP-001", "idempotency_key": "bank-supplier-payment-001",
+    })
+    assert payment.status_code == 201
+    imported = client.post(
+        "/api/v1/bank-reconciliation/imports?account_label=Operating%20Account",
+        headers={**headers, "Content-Type": "text/csv"},
+        content="date,description,amount,reference\n2026-11-20,Supplier EFT,-115.00,EFT-SUP-001\n",
+    )
+    assert imported.status_code == 201
+    row = client.get("/api/v1/bank-reconciliation/transactions?reconciliation_status=unmatched", headers=headers).json()[0]
+    suggestions = client.get(f"/api/v1/bank-reconciliation/transactions/{row['id']}/suggestions", headers=headers)
+    assert suggestions.status_code == 200
+    candidate = next(item for item in suggestions.json()["candidates"] if item["source_type"] == "supplier_payment")
+    assert candidate["source_id"] == payment.json()["payment"]["id"]
+    assert candidate["reference_match"] is True
+    confirmed = client.post(f"/api/v1/bank-reconciliation/transactions/{row['id']}/match", headers=headers, json={
+        "source_type": "supplier_payment", "source_id": candidate["source_id"],
+    })
+    assert confirmed.status_code == 200
+    assert confirmed.json()["matched_source_type"] == "supplier_payment"
+    replay_row = client.post(
+        "/api/v1/bank-reconciliation/imports?account_label=Second%20Account",
+        headers={**headers, "Content-Type": "text/csv"},
+        content="date,description,amount,reference\n2026-11-20,Same supplier EFT,-115.00,EFT-SUP-001\n",
+    )
+    assert replay_row.status_code == 201
+    second_row = client.get("/api/v1/bank-reconciliation/transactions?reconciliation_status=unmatched", headers=headers).json()[0]
+    second_suggestions = client.get(f"/api/v1/bank-reconciliation/transactions/{second_row['id']}/suggestions", headers=headers).json()
+    assert all(item["source_type"] != "supplier_payment" for item in second_suggestions["candidates"])

@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.api.routes.auth import get_current_user
 from app.db import get_db
-from app.models import BankStatementImport, BankStatementMatchLink, BankStatementTransaction, FinanceTransaction, Membership, POSTransaction, User
+from app.models import BankStatementImport, BankStatementMatchLink, BankStatementTransaction, FinanceTransaction, Membership, POSTransaction, SupplierInvoicePayment, User
 
 router = APIRouter(prefix="/bank-reconciliation", tags=["bank reconciliation"])
 MAX_BYTES = 5 * 1024 * 1024
@@ -240,6 +240,29 @@ def _suggestions_for_bank_row(record: BankStatementTransaction, membership: Memb
         label = f"POS {item.transaction_type} · {item.branch_name or 'Branch not supplied'} · {item.till_name or 'Till not supplied'}"
         candidates.append(_candidate_payload("pos", item.id, label, item.net_amount, source_date, ref_match))
 
+    supplier_payments = db.scalars(select(SupplierInvoicePayment).where(
+        SupplierInvoicePayment.business_id == membership.business_id,
+        SupplierInvoicePayment.currency == record.currency,
+        SupplierInvoicePayment.amount == abs(record.amount),
+    )).all()
+    for payment in supplier_payments:
+        # Supplier payments are outgoing cash movements, so only negative bank rows qualify.
+        if record.amount >= 0 or not start_date <= payment.payment_date <= end_date:
+            continue
+        if db.scalar(select(BankStatementTransaction.id).where(
+            BankStatementTransaction.business_id == membership.business_id,
+            BankStatementTransaction.matched_source_type == "supplier_payment",
+            BankStatementTransaction.matched_source_id == payment.id,
+        )) or db.scalar(select(BankStatementMatchLink.id).where(
+            BankStatementMatchLink.business_id == membership.business_id,
+            BankStatementMatchLink.source_type == "supplier_payment",
+            BankStatementMatchLink.source_id == payment.id,
+        )):
+            continue
+        label = f"Supplier payment · {payment.payment_method} · {payment.reference or 'No reference'}"
+        ref_match = bool(bank_reference and payment.reference and bank_reference == payment.reference.strip().casefold())
+        candidates.append(_candidate_payload("supplier_payment", payment.id, label, payment.amount, payment.payment_date, ref_match))
+
     candidates.sort(key=lambda item: (not item["reference_match"], item["source_date"]))
     return candidates[:20]
 
@@ -284,8 +307,8 @@ def confirm_bank_match(
         raise HTTPException(status_code=409, detail="This bank transaction has already been reviewed.")
     source_type = payload.get("source_type")
     source_id = str(payload.get("source_id") or "").strip()
-    if source_type not in {"finance", "pos"} or not source_id:
-        raise HTTPException(status_code=422, detail="Select a valid finance or POS source record.")
+    if source_type not in {"finance", "pos", "supplier_payment"} or not source_id:
+        raise HTTPException(status_code=422, detail="Select a valid finance, POS or supplier payment source record.")
     candidates = _suggestions_for_bank_row(record, membership, db)
     selected = next((item for item in candidates if item["source_type"] == source_type and item["source_id"] == source_id), None)
     if not selected:
