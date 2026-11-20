@@ -13,9 +13,20 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed: str) -> bool:
     return password_hash.verify(password, hashed)
 
-def create_access_token(user_id: str) -> str:
+def create_access_token(user_id: str, business_id: str | None = None) -> str:
     expires = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
-    return jwt.encode({"sub": str(UUID(user_id)), "exp": expires}, settings.jwt_secret_key, algorithm=ALGORITHM)
+    claims = {"sub": str(UUID(user_id)), "exp": expires}
+    if business_id:
+        claims["business_id"] = str(UUID(business_id))
+    return jwt.encode(claims, settings.jwt_secret_key, algorithm=ALGORITHM)
+
+def decode_access_token_business_id(token: str) -> str | None:
+    try:
+        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[ALGORITHM])
+        business_id = payload.get("business_id")
+        return str(UUID(business_id)) if business_id else None
+    except (JWTError, ValueError, TypeError):
+        return None
 
 def decode_access_token(token: str) -> str | None:
     try:

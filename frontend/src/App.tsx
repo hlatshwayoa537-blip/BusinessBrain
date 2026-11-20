@@ -16,6 +16,7 @@ type Quotation = { id: string; deal_room_id: string; issuer_business_id: string;
 type QuoteLineDraft = { description: string; quantity: string; unit_price: string; tax_rate: string };
 type DealFile = { id: string; deal_room_id: string; uploader_business_id: string; uploader_business_name: string; original_filename: string; content_type: string; size_bytes: number; status: string; created_at: string };
 type AuthData = { access_token: string; user: { id: string; email: string; full_name: string }; business: BusinessProfile & { id: string } };
+type BusinessWorkspace = { id: string; name: string; industry: string; country: string; role: string; active: boolean };
 const STORAGE_KEY = "businessbrain.session";
 const modules = [
   { icon: ChartNoAxesCombined, title: "Financial Intelligence", detail: "Understand your business finances", tag: "Available" },
@@ -1354,6 +1355,8 @@ function SupplierPayablesWorkspace({session}:{session:AuthData}) {
 export default function App() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
   const [session, setSession] = useState<AuthData | null>(readSession);
+  const [businessWorkspaces, setBusinessWorkspaces] = useState<BusinessWorkspace[]>([]);
+  const [workspaceSwitchBusy, setWorkspaceSwitchBusy] = useState(false);
   const [mode, setMode] = useState<"register" | "login">("register");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1431,6 +1434,44 @@ export default function App() {
   const staffInviteToken = new URLSearchParams(window.location.search).get("staff_invite") ?? "";
   async function refreshStaff() { if (!session) return; try { const [members, invites] = await Promise.all([networkRequest("/staff"), networkRequest("/staff/invitations")]); setStaff(members); setStaffInvitations(invites); } catch (err) { setStaffMessage(err instanceof Error ? err.message : "Could not load staff."); } }
   useEffect(() => { if (session) void refreshStaff(); }, [session?.access_token]);
+  useEffect(() => {
+    if (!session) { setBusinessWorkspaces([]); return; }
+    let cancelled = false;
+    networkRequest("/auth/businesses").then((rows: BusinessWorkspace[]) => {
+      if (!cancelled) setBusinessWorkspaces(rows);
+    }).catch(() => {
+      if (!cancelled) setBusinessWorkspaces([{ id: session.business.id, name: session.business.name, industry: session.business.industry, country: session.business.country, role: "member", active: true }]);
+    });
+    return () => { cancelled = true; };
+  }, [session?.access_token]);
+  async function switchBusinessWorkspace(businessId: string) {
+    if (!session || businessId === session.business.id || workspaceSwitchBusy) return;
+    setWorkspaceSwitchBusy(true);
+    try {
+      const data = await networkRequest("/auth/business/switch", "POST", { business_id: businessId });
+      const nextSession = { ...session, access_token: data.access_token, business: data.business };
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession));
+      setSession(nextSession);
+      setProfileDraft({
+        name: data.business.name, industry: data.business.industry, country: data.business.country,
+        registration_number: data.business.registration_number ?? "", website: data.business.website ?? "",
+        contact_email: data.business.contact_email ?? "", phone: data.business.phone ?? "",
+        address_line: data.business.address_line ?? "", city: data.business.city ?? "",
+        province: data.business.province ?? "", postal_code: data.business.postal_code ?? "",
+        description: data.business.description ?? "", profile_image_data_url: data.business.profile_image_data_url ?? null,
+        directory_listed: data.business.directory_listed ?? false, public_email: data.business.public_email ?? false,
+        public_phone: data.business.public_phone ?? false, public_website: data.business.public_website ?? false,
+        public_location: data.business.public_location ?? false,
+      });
+      setProfileImage(data.business.profile_image_data_url ?? null);
+      setSelectedConversation(null);
+      setWorkspaceSwitchBusy(false);
+    } catch (err) {
+      setNetworkActionMessage(err instanceof Error ? err.message : "Could not switch business workspace.");
+      setWorkspaceSwitchBusy(false);
+    }
+  }
+
   async function inviteStaff(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setStaffBusy(true); setStaffMessage(""); setStaffWhatsAppUrl(""); try { const result = await networkRequest("/staff/invitations", "POST", { phone: staffPhone, role: staffRole }); const text = `You have been invited to join ${session?.business.name} on VEXION as ${staffRole}. Accept your secure invitation here (expires in 48 hours): ${result.invite_url}`; setStaffWhatsAppUrl("https://wa.me/" + result.phone + "?text=" + encodeURIComponent(text)); setStaffPhone(""); setStaffMessage("Invitation created. Open WhatsApp to send it to your team member."); await refreshStaff(); } catch (err) { setStaffMessage(err instanceof Error ? err.message : "Invitation could not be created."); } finally { setStaffBusy(false); } }
   async function changeStaffRole(id: string, role: string) { try { await networkRequest("/staff/" + id, "PATCH", { role }); await refreshStaff(); } catch (err) { setStaffMessage(err instanceof Error ? err.message : "Role could not be changed."); } }
   async function removeStaff(id: string) { if (!window.confirm("Remove this staff member access to the business?")) return; try { await networkRequest("/staff/" + id, "DELETE"); await refreshStaff(); } catch (err) { setStaffMessage(err instanceof Error ? err.message : "Staff member could not be removed."); } }
@@ -1791,7 +1832,7 @@ export default function App() {
     <aside className="sidebar">
       <a className="brand" href="/" aria-label="VEXION home"><div className="brand-mark"><Activity size={22}/></div><span>VEXION</span></a>
       <div className="workspace-label">WORKSPACE</div>
-      <div className="workspace-switch"><span className="workspace-icon">{session.business.profile_image_data_url ? <img src={session.business.profile_image_data_url} alt="Business profile"/> : <Building2 size={17}/>}</span><span><strong>{session.business.name}</strong><small>{session.business.industry}</small></span><ChevronRight size={16}/></div>
+      <div className="workspace-switch"><span className="workspace-icon">{session.business.profile_image_data_url ? <img src={session.business.profile_image_data_url} alt="Business profile"/> : <Building2 size={17}/>}</span><span><strong>{session.business.name}</strong><small>{session.business.industry}</small></span><ChevronRight size={16}/></div>{businessWorkspaces.length > 1 && <label className="workspace-picker-label" htmlFor="business-workspace-picker">Switch business<select id="business-workspace-picker" className="workspace-picker" value={session.business.id} disabled={workspaceSwitchBusy} onChange={event=>void switchBusinessWorkspace(event.target.value)}>{businessWorkspaces.map(workspace=><option key={workspace.id} value={workspace.id}>{workspace.name} · {workspace.role}</option>)}</select></label>}
       <nav className="navigation" aria-label="Main navigation"><a className="nav-item active" href="#overview"><LayoutDashboard size={18}/>Overview</a><a className="nav-item" href="#pos-connections"><Activity size={18}/>POS Connections</a><a className="nav-item" href="#discrepancies"><AlertTriangle size={18}/>Discrepancies</a><a className="nav-item" href="#sales-intelligence"><ChartNoAxesCombined size={18}/>Sales Intelligence</a><a className="nav-item" href="#invoices"><FileText size={18}/>Invoices</a><a className="nav-item" href="#finance"><CreditCard size={18}/>Expenses & Profit</a><a className="nav-item" href="#cash-control"><CreditCard size={18}/>Cash Control</a><a className="nav-item" href="#billing"><CreditCard size={18}/>Billing & POS Pricing</a><a className="nav-item" href="#referrals"><Users size={18}/>Refer & Earn</a><a className="nav-item" href="#customers"><Users size={18}/>Customers</a><a className="nav-item" href="#operations"><Package size={18}/>Operations</a><a className="nav-item" href="#team"><Users size={18}/>Team Management</a><a className="nav-item" href="#people"><BriefcaseBusiness size={18}/>People & HR</a><a className="nav-item" href="#business-profile"><Building2 size={18}/>Business Profile</a><a className="nav-item" href="#network"><Building2 size={18}/>Business Network</a><a className="nav-item" href="#private-conversations"><LockKeyhole size={18}/>Private Conversations</a></nav>
       <div className="sidebar-bottom"><a className="nav-item" href="#settings"><Settings2 size={18}/>Settings</a><a className="nav-item" href="#help"><CircleHelp size={18}/>Help & support</a><button className="nav-item signout-button" onClick={signOut}><LogOut size={18}/>Sign out</button><div className="security-note"><ShieldCheck size={17}/><span>Designed with business data security at its core.</span></div></div>
     </aside>

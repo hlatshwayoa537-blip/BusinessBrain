@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.api.business_context import get_business_membership
 from app.api.routes.auth import get_current_user
 from app.db import get_db
 from app.models import (
@@ -22,7 +23,7 @@ from app.security import hash_password, verify_password
 router = APIRouter(prefix="/network", tags=["business conversations and deal rooms"])
 
 def current_business(db: Session, user: User) -> Business:
-    membership = db.scalar(select(Membership).where(Membership.user_id == user.id).order_by(Membership.created_at))
+    membership = get_business_membership(user, db)
     if not membership:
         raise HTTPException(status_code=403, detail="No business workspace is linked to this account.")
     business = db.get(Business, membership.business_id)

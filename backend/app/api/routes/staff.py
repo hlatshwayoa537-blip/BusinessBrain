@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.business_context import get_business_membership
 from app.api.routes.auth import get_current_user
 from app.core.config import settings
 from app.db import get_db
@@ -32,7 +33,7 @@ class StaffRoleUpdate(BaseModel):
     role: str = Field(pattern=r"^(admin|manager|employee|hr)$")
 
 def get_membership(user: User, db: Session):
-    membership = db.scalar(select(Membership).where(Membership.user_id == user.id).order_by(Membership.created_at))
+    membership = get_business_membership(user, db)
     if not membership:
         raise HTTPException(status_code=403, detail="No business workspace is linked to this account.")
     return membership

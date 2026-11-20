@@ -4,15 +4,16 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.db import get_db
+from app.api.business_context import get_business_membership
 from app.models import Business, BusinessReferral, BusinessReferralProfile, Membership, User
 from app.schemas import AuthResponse, BusinessProfileUpdate, BusinessResponse, LoginRequest, RegisterRequest, UserResponse
-from app.security import create_access_token, decode_access_token, hash_password, verify_password
+from app.security import create_access_token, decode_access_token, decode_access_token_business_id, hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 bearer = HTTPBearer(auto_error=False)
 
 def build_auth_response(user: User, business: Business) -> AuthResponse:
-    return AuthResponse(access_token=create_access_token(user.id), user=UserResponse.model_validate(user), business=business)
+    return AuthResponse(access_token=create_access_token(user.id, business.id), user=UserResponse.model_validate(user), business=business)
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthResponse:
@@ -59,7 +60,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
         raise HTTPException(status_code=401, detail="Incorrect email/WhatsApp number or password.")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="This account is disabled.")
-    membership = db.scalar(select(Membership).where(Membership.user_id == user.id).order_by(Membership.created_at))
+    membership = get_business_membership(user, db)
     if not membership:
         raise HTTPException(status_code=403, detail="No business workspace is linked to this account.")
     business = db.get(Business, membership.business_id)
@@ -76,7 +77,42 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
     user = db.get(User, user_id)
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="Account is unavailable.")
+    user.active_business_id = decode_access_token_business_id(credentials.credentials)
     return user
+
+
+@router.get("/businesses")
+def list_business_workspaces(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[dict]:
+    rows = db.execute(
+        select(Membership, Business)
+        .join(Business, Business.id == Membership.business_id)
+        .where(Membership.user_id == current_user.id)
+        .order_by(Membership.created_at, Membership.id)
+    ).all()
+    return [
+        {"id": business.id, "name": business.name, "industry": business.industry, "country": business.country,
+         "role": membership.role, "active": business.id == getattr(current_user, "active_business_id", None)}
+        for membership, business in rows
+    ]
+
+
+@router.post("/business/switch")
+def switch_business_workspace(payload: dict, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    business_id = payload.get("business_id")
+    if not isinstance(business_id, str) or len(business_id) != 36:
+        raise HTTPException(status_code=422, detail="A valid business workspace ID is required.")
+    membership = db.scalar(select(Membership).where(
+        Membership.user_id == current_user.id, Membership.business_id == business_id
+    ))
+    if not membership:
+        raise HTTPException(status_code=403, detail="You do not have access to this business workspace.")
+    business = db.get(Business, business_id)
+    if not business:
+        raise HTTPException(status_code=404, detail="Business workspace not found.")
+    return {"access_token": create_access_token(current_user.id, business.id), "token_type": "bearer",
+            "business": BusinessResponse.model_validate(business),
+            "user": UserResponse.model_validate(current_user)}
+
 
 @router.get("/me", response_model=UserResponse)
 def me(current_user: User = Depends(get_current_user)) -> UserResponse:
@@ -85,7 +121,7 @@ def me(current_user: User = Depends(get_current_user)) -> UserResponse:
 
 @router.get("/business/profile", response_model=BusinessResponse)
 def get_business_profile(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> BusinessResponse:
-    membership = db.scalar(select(Membership).where(Membership.user_id == current_user.id).order_by(Membership.created_at))
+    membership = get_business_membership(current_user, db)
     if not membership:
         raise HTTPException(status_code=404, detail="Business workspace not found.")
     business = db.get(Business, membership.business_id)
