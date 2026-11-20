@@ -259,10 +259,6 @@ def _suggestions_for_bank_row(record: BankStatementTransaction, membership: Memb
             BankStatementMatchLink.source_id == payment.id,
         )):
             continue
-        invoice = db.scalar(select(SupplierInvoicePayment.invoice_id).where(
-            SupplierInvoicePayment.id == payment.id,
-            SupplierInvoicePayment.business_id == membership.business_id,
-        ))
         label = f"Supplier payment · {payment.payment_method} · {payment.reference or 'No reference'}"
         ref_match = bool(bank_reference and payment.reference and bank_reference == payment.reference.strip().casefold())
         candidates.append(_candidate_payload("supplier_payment", payment.id, label, payment.amount, payment.payment_date, ref_match))
