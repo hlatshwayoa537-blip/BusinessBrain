@@ -438,7 +438,7 @@ async def receive_payfast_itn(request: Request, db: Session = Depends(get_db)) -
     referral = db.scalar(select(BusinessReferral).where(
         BusinessReferral.referred_business_id == payment.business_id,
     ))
-    if referral and referral.status != "payment_verified":
+    if referral and referral.status == "pending_payment":
         referral.status = "payment_verified"
     db.commit()
     return {"status": "accepted", "payment_status": "verified",
