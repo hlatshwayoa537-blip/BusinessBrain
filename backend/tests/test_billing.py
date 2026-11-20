@@ -175,3 +175,103 @@ def test_discovery_does_not_reactivate_a_manually_deactivated_terminal(client):
     assert refreshed["active_pos_terminals"] == 0
     assert refreshed["inactive_pos_terminals"] == 1
     assert refreshed["estimated_monthly_total"] == "0.00"
+
+
+def test_payfast_checkout_creates_pending_payment_without_activating_subscription(client, monkeypatch):
+    from app.core.config import settings
+    headers = register_owner(client, "payfast-checkout@example.com")
+    terminal = client.post("/api/v1/billing/terminals", headers=headers, json={"external_terminal_id": "PF-01", "display_name": "Main till"})
+    assert terminal.status_code == 201
+    monkeypatch.setattr(settings, "payfast_merchant_id", "10000100")
+    monkeypatch.setattr(settings, "payfast_merchant_key", "merchant-key")
+    monkeypatch.setattr(settings, "payfast_passphrase", "test-pass")
+    monkeypatch.setattr(settings, "payfast_sandbox", True)
+    response = client.post("/api/v1/billing/payfast/checkout", headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["amount"] == "499.00"
+    assert body["status"] == "pending_verification"
+    assert body["checkout_url"] == "https://sandbox.payfast.co.za/eng/process"
+    assert body["fields"]["notify_url"].endswith("/api/v1/billing/payfast/itn")
+    overview = client.get("/api/v1/billing/me", headers=headers).json()
+    assert overview["subscription_status"] == "pending"
+    assert overview["payment_status"] == "pending"
+
+
+def test_payfast_checkout_requires_active_pos_terminal(client, monkeypatch):
+    from app.core.config import settings
+    headers = register_owner(client, "payfast-no-pos@example.com")
+    monkeypatch.setattr(settings, "payfast_merchant_id", "10000100")
+    monkeypatch.setattr(settings, "payfast_merchant_key", "merchant-key")
+    monkeypatch.setattr(settings, "payfast_passphrase", "test-pass")
+    response = client.post("/api/v1/billing/payfast/checkout", headers=headers)
+    assert response.status_code == 400
+    assert "active POS terminal" in response.json()["detail"]
+
+
+def test_payfast_itn_rejects_invalid_signature(client, monkeypatch):
+    from app.core.config import settings
+    headers = register_owner(client, "payfast-itn-invalid@example.com")
+    monkeypatch.setattr(settings, "payfast_merchant_id", "10000100")
+    monkeypatch.setattr(settings, "payfast_passphrase", "test-pass")
+    response = client.post(
+        "/api/v1/billing/payfast/itn",
+        content="merchant_id=10000100&m_payment_id=unknown&signature=bad",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert response.status_code == 400
+    assert "signature" in response.json()["detail"].lower()
+
+
+def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
+    from urllib.parse import urlencode
+    from app.core.config import settings
+    from app.services.payfast import generate_signature
+    import app.api.routes.billing as billing_routes
+
+    headers = register_owner(client, "payfast-verified@example.com")
+    client.post("/api/v1/billing/terminals", headers=headers, json={
+        "external_terminal_id": "PF-VERIFIED-01", "display_name": "Verified till"
+    })
+    monkeypatch.setattr(settings, "payfast_merchant_id", "10000100")
+    monkeypatch.setattr(settings, "payfast_merchant_key", "merchant-key")
+    monkeypatch.setattr(settings, "payfast_passphrase", "test-pass")
+    monkeypatch.setattr(settings, "payfast_sandbox", True)
+    checkout = client.post("/api/v1/billing/payfast/checkout", headers=headers)
+    assert checkout.status_code == 200
+    payment_reference = checkout.json()["payment_reference"]
+
+    monkeypatch.setattr(billing_routes, "_payfast_source_allowed", lambda _address: True)
+    monkeypatch.setattr(billing_routes, "_confirm_payfast_itn", lambda _body, _sandbox: True)
+    fields = {
+        "merchant_id": "10000100",
+        "m_payment_id": payment_reference,
+        "pf_payment_id": "sandbox-provider-payment-1",
+        "payment_status": "COMPLETE",
+        "item_name": "VEXION monthly subscription",
+        "amount_gross": "499.00",
+        "amount_fee": "0.00",
+        "amount_net": "499.00",
+        "currency": "ZAR",
+        "token": "sandbox-subscription-token",
+    }
+    signature = generate_signature(fields, "test-pass", fields.keys())
+    payload = urlencode({**fields, "signature": signature})
+    notification = client.post(
+        "/api/v1/billing/payfast/itn",
+        content=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert notification.status_code == 200
+    assert notification.json()["payment_status"] == "verified"
+    overview = client.get("/api/v1/billing/me", headers=headers).json()
+    assert overview["subscription_status"] == "active"
+    assert overview["payment_status"] == "paid"
+
+    duplicate = client.post(
+        "/api/v1/billing/payfast/itn",
+        content=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert duplicate.status_code == 200
+    assert duplicate.json()["duplicate"] is True

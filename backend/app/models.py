@@ -389,6 +389,27 @@ class BusinessSubscription(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
 
+class PayFastPayment(Base):
+    __tablename__ = "payfast_payments"
+    __table_args__ = (
+        UniqueConstraint("m_payment_id", name="uq_payfast_payment_reference"),
+        UniqueConstraint("pf_payment_id", name="uq_payfast_provider_payment"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    subscription_id: Mapped[str] = mapped_column(ForeignKey("business_subscriptions.id", ondelete="CASCADE"), nullable=False, index=True)
+    m_payment_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    pf_payment_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="ZAR")
+    terminal_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    referral_discount_applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending", index=True)
+    provider_subscription_token: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
 class Discrepancy(Base):
     __tablename__ = "discrepancies"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
