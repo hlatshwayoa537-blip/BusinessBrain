@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.frontend_origins.split(",") if origin.strip()]
 
+    @property
+    def public_frontend_base_url(self) -> str:
+        configured = self.frontend_base_url.strip().rstrip("/")
+        if self.app_env.lower() == "production" and not configured.startswith("https://"):
+            return next((origin.rstrip("/") for origin in self.cors_origins if origin.startswith("https://")), "")
+        return configured
+
 
 @lru_cache
 def get_settings() -> Settings:
