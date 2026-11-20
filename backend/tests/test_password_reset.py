@@ -1,8 +1,6 @@
-import hashlib
 from urllib.parse import urlparse, parse_qs
 
 from app.api.routes import auth as auth_routes
-from app.models import UserActionToken
 
 
 def test_password_reset_is_one_time_and_revokes_existing_access_tokens(client, monkeypatch):
