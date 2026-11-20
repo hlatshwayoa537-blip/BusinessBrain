@@ -305,7 +305,6 @@ def create_payfast_checkout(user: User = Depends(get_current_user), db: Session 
     )
     db.add(payment)
     db.flush()
-    base_url = settings.frontend_base_url.rstrip("/")
     try:
         checkout_url, fields = build_subscription_checkout(
             merchant_id=settings.payfast_merchant_id,
