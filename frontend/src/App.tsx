@@ -852,6 +852,8 @@ type BillingOverview = {
   estimated_monthly_total: string;
   standard_unit_price: string;
   referral_unit_price: string;
+  checkout_available: boolean;
+  subscription_update_available: boolean;
   notice: string;
   terminals: {id:string;external_terminal_id:string;display_name:string;branch_name?:string|null;connection_id?:string|null;source?:string;status:string;created_at:string}[];
 };
@@ -865,6 +867,8 @@ function BillingWorkspace({session}:{session:AuthData}) {
   const [terminalId,setTerminalId]=useState("");
   const [terminalName,setTerminalName]=useState("");
   const [branchName,setBranchName]=useState("");
+  const [checkoutBusy,setCheckoutBusy]=useState(false);
+  const [priceSyncBusy,setPriceSyncBusy]=useState(false);
 
   async function request(path:string,method="GET",body?:unknown) {
     const response=await fetch(API_BASE+path,{method,headers:{Authorization:"Bearer "+session.access_token,...(body?{"Content-Type":"application/json"}:{})},...(body?{body:JSON.stringify(body)}:{})});
@@ -896,9 +900,30 @@ function BillingWorkspace({session}:{session:AuthData}) {
     catch(err) {setError(err instanceof Error?err.message:"POS terminal status could not be updated.");}
   }
   const money=(value:string)=>"R "+Number(value).toLocaleString("en-ZA",{minimumFractionDigits:2,maximumFractionDigits:2});
+  async function startCheckout() {
+    setCheckoutBusy(true);setError("");setMessage("");
+    try {
+      const checkout=await request("/billing/payfast/checkout","POST") as {checkout_url:string;fields:Record<string,string>};
+      const form=document.createElement("form");
+      form.method="POST";form.action=checkout.checkout_url;
+      Object.entries(checkout.fields).forEach(([name,value])=>{
+        const input=document.createElement("input");input.type="hidden";input.name=name;input.value=value;form.appendChild(input);
+      });
+      document.body.appendChild(form);form.submit();
+    } catch(err) {setError(err instanceof Error?err.message:"PayFast checkout could not be started.");setCheckoutBusy(false);}
+  }
+  async function syncRecurringPrice() {
+    setPriceSyncBusy(true);setError("");setMessage("");
+    try {
+      const result=await request("/billing/payfast/update-amount","POST") as {recurring_amount:string;effective_for:string};
+      setMessage("PayFast confirmed the recurring amount update to "+money(result.recurring_amount)+". It applies to future recurring charges.");
+      await load();
+    } catch(err) {setError(err instanceof Error?err.message:"The recurring subscription amount could not be updated.");}
+    finally {setPriceSyncBusy(false);}
+  }
 
   return <section className="billing-workspace" id="billing">
-    <div className="profile-centre-heading"><div><div className="eyebrow">VEXION SUBSCRIPTION</div><h2>POS-based pricing and subscription overview.</h2><p>Track registered tills and see the estimated monthly price for your business.</p></div><span className="profile-status">Payment setup pending</span></div>
+    <div className="profile-centre-heading"><div><div className="eyebrow">VEXION SUBSCRIPTION</div><h2>POS-based pricing and subscription overview.</h2><p>Track registered tills, pay securely through PayFast and manage your recurring monthly price.</p></div><span className={"profile-status billing-status-"+(data?.payment_status||"loading")}>{data?.payment_status==="paid"?"Subscription active":data?.payment_status==="pending"?"Payment pending":data?.payment_status==="not_configured"?"Not subscribed":"Loading"}</span></div>
     {error&&<p className="finance-alert" role="alert">{error}</p>}{message&&<p className="finance-success" role="status">{message}</p>}
     {loading?<p className="network-empty">Loading billing overview…</p>:data&&<>
       <div className="billing-stats">
@@ -907,7 +932,13 @@ function BillingWorkspace({session}:{session:AuthData}) {
         <article><span>Estimated monthly total</span><strong>{money(data.estimated_monthly_total)}</strong><small>Based on active registered POS</small></article>
         <article><span>Verified referrals</span><strong>{data.verified_direct_referrals} / 5</strong><small>{data.referral_discount_eligible?"Referral price unlocked":"Five paying referrals required"}</small></article>
       </div>
-      <div className="billing-price-note"><strong>Pricing rules</strong><span>R499 per active POS terminal each month. After five directly referred businesses have verified paid subscriptions, your rate becomes R399 per active POS terminal each month.</span></div>
+      <div className="billing-price-note"><strong>Pricing rules</strong><span>R499 per active POS terminal each month. After five directly referred businesses have verified paid subscriptions, your rate becomes R399 per active POS terminal each month. The lower rate is applied to future recurring charges after PayFast confirms the update.</span></div>
+      <div className="billing-actions">
+        {data.payment_status==="paid"&&data.subscription_update_available&&<button type="button" className="network-primary-button" onClick={()=>void syncRecurringPrice()} disabled={priceSyncBusy}>{priceSyncBusy?"Updating PayFast…":"Apply current price to next recurring charge"}</button>}
+        {data.payment_status!=="paid"&&data.checkout_available&&<button type="button" className="network-primary-button" onClick={()=>void startCheckout()} disabled={checkoutBusy||data.active_pos_terminals<1||data.payment_status==="pending"}>{checkoutBusy?"Opening secure checkout…":data.payment_status==="pending"?"Payment verification pending":"Subscribe securely with PayFast"}</button>}
+        {!data.checkout_available&&<span className="billing-setup-note">PayFast checkout is not enabled yet. The merchant account credentials must be configured before customers can pay.</span>}
+        {data.payment_status==="paid"&&!data.subscription_update_available&&<span className="billing-setup-note">Recurring price updates are unavailable until the PayFast subscription token and API credentials are configured.</span>}
+      </div>
       <div className="billing-columns">
         <form className="finance-form" onSubmit={registerTerminal}>
           <div className="recruitment-card-heading"><div><span className="eyebrow">POS REGISTER</span><h3>Add a POS terminal</h3></div></div>
@@ -925,7 +956,7 @@ function BillingWorkspace({session}:{session:AuthData}) {
           </article>)}
         </div>
       </div>
-      <div className="billing-payment-note"><strong>Subscription not activated</strong><p>{data.notice}</p><span>Online payments, invoices for subscriptions and automatic POS discovery will be added in later releases. No money is collected through this page.</span></div>
+      <div className="billing-payment-note"><strong>{data.payment_status==="paid"?"PayFast subscription verified":data.payment_status==="pending"?"Awaiting PayFast verification":"Payment and subscription status"}</strong><p>{data.notice}</p><span>Card details are entered only on PayFast. VEXION never stores card numbers or CVV data. A return from PayFast does not activate access; only a verified server notification does.</span></div>
     </>}
   </section>;
 }
