@@ -160,9 +160,11 @@ def test_clamav_requires_a_complete_explicit_clean_verdict(monkeypatch, replies,
 
 def test_ooxml_rejects_corrupt_document_member_crc(monkeypatch):
     payload = bytearray(make_ooxml(".docx"))
-    # Corrupt a byte in the stored/deflated document member while preserving
-    # the ZIP directory so the archive's per-member CRC check catches it.
-    payload[-8] ^= 0x01
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        info = archive.getinfo("word/document.xml")
+        data_offset = info.header_offset + 30 + len(info.filename.encode()) + len(info.extra)
+    # Flip a compressed document byte without changing the central directory.
+    payload[data_offset] ^= 0x01
     with pytest.raises(HTTPException) as error:
         validate(monkeypatch, bytes(payload), ".docx")
     assert error.value.status_code == 422
