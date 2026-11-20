@@ -237,3 +237,27 @@
 .billing-status-paid{border-color:#28695d;color:#5de0c1}
 .billing-status-pending{border-color:#755d35;color:#f1cd8c}
 .billing-status-not_configured{border-color:#42566a;color:#a9bbc8}
+
+
+.auth-link {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  color: var(--accent, #42e8cf);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.86rem;
+  padding: 2px 0;
+  text-align: left;
+}
+.auth-link:hover { text-decoration: underline; }
+.auth-recovery-card { width: min(100%, 480px); margin: 7vh auto; }
+.auth-success {
+  border: 1px solid rgba(66, 232, 207, 0.28);
+  border-radius: 12px;
+  background: rgba(66, 232, 207, 0.08);
+  color: #baf8ed;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  padding: 12px 14px;
+}
