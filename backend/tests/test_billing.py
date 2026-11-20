@@ -255,14 +255,14 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     fields = {
         "merchant_id": "10000100",
         "m_payment_id": payment_reference,
-        "pf_payment_id": "sandbox-provider-payment-1",
+        "pf_payment_id": "1089250",
         "payment_status": "COMPLETE",
         "item_name": "VEXION monthly subscription",
         "amount_gross": "499.00",
         "amount_fee": "0.00",
         "amount_net": "499.00",
         "currency": "ZAR",
-        "token": "sandbox-subscription-token",
+        "token": "dc0521d3-55fe-269b-fa00-b647310d760f",
     }
     signature = generate_signature(fields, "test-pass", fields.keys())
     payload = urlencode({**fields, "signature": signature})
@@ -292,7 +292,7 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     assert price_update.status_code == 200
     assert price_update.json()["recurring_amount"] == "499.00"
     assert price_update.json()["effective_for"] == "future recurring charges"
-    assert update_calls[0]["token"] == "sandbox-subscription-token"
+    assert update_calls[0]["token"] == "dc0521d3-55fe-269b-fa00-b647310d760f"
     assert update_calls[0]["amount"] == 499
     assert update_calls[0]["sandbox"] is True
 
@@ -303,6 +303,56 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     )
     assert duplicate.status_code == 200
     assert duplicate.json()["duplicate"] is True
+
+    # Subsequent monthly charges may omit m_payment_id; the subscription token
+    # identifies the active recurring subscription.
+    recurring_fields = {key: value for key, value in fields.items() if key != "m_payment_id"}
+    recurring_fields["pf_payment_id"] = "1089251"
+    recurring_fields["amount_gross"] = "498.99"
+    recurring_signature = generate_signature(recurring_fields, "test-pass", recurring_fields.keys())
+    recurring_payload = urlencode({**recurring_fields, "signature": recurring_signature})
+    wrong_amount = client.post(
+        "/api/v1/billing/payfast/itn",
+        content=recurring_payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "197.97.145.144"},
+    )
+    assert wrong_amount.status_code == 400
+
+    recurring_fields["pf_payment_id"] = "1089252"
+    recurring_fields["amount_gross"] = "499.00"
+    recurring_signature = generate_signature(recurring_fields, "test-pass", recurring_fields.keys())
+    recurring_payload = urlencode({**recurring_fields, "signature": recurring_signature})
+    recurring = client.post(
+        "/api/v1/billing/payfast/itn",
+        content=recurring_payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "197.97.145.144"},
+    )
+    assert recurring.status_code == 200
+    assert recurring.json()["recurring"] is True
+    assert recurring.json()["subscription_status"] == "active"
+
+    # PayFast cancellation notifications also identify the subscription by token
+    # and do not necessarily include m_payment_id or amount_gross.
+    cancelled_fields = {
+        "merchant_id": "10000100",
+        "pf_payment_id": "1089253",
+        "payment_status": "CANCELLED",
+        "item_name": "VEXION monthly subscription",
+        "token": "dc0521d3-55fe-269b-fa00-b647310d760f",
+    }
+    cancelled_signature = generate_signature(cancelled_fields, "test-pass", cancelled_fields.keys())
+    cancelled_payload = urlencode({**cancelled_fields, "signature": cancelled_signature})
+    cancelled = client.post(
+        "/api/v1/billing/payfast/itn",
+        content=cancelled_payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "197.97.145.144"},
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.json()["subscription_status"] == "cancelled"
+    after_cancel = client.get("/api/v1/referrals/me", headers=referrer_headers).json()
+    assert after_cancel["payment_verified_referrals"] == 0
+    assert after_cancel["referrals"][0]["status"] == "cancelled"
+    assert client.get("/api/v1/billing/me", headers=headers).json()["subscription_status"] == "cancelled"
 
 
 
@@ -345,3 +395,45 @@ def test_payfast_source_ip_fails_closed_when_cloudflare_header_is_malformed():
         "server": ("vexion-api", 443),
     })
     assert not _payfast_source_allowed(_payfast_request_ip(request))
+
+
+
+def test_payfast_itn_requires_recurring_subscription_token(client, monkeypatch):
+    from urllib.parse import urlencode
+    from app.core.config import settings
+    from app.services.payfast import generate_signature
+    import app.api.routes.billing as billing_routes
+
+    headers = register_owner(client, "payfast-token-required@example.com")
+    client.post("/api/v1/billing/terminals", headers=headers, json={
+        "external_terminal_id": "PF-TOKEN-01", "display_name": "Token required till"
+    })
+    monkeypatch.setattr(settings, "payfast_merchant_id", "10000100")
+    monkeypatch.setattr(settings, "payfast_merchant_key", "merchant-key")
+    monkeypatch.setattr(settings, "payfast_passphrase", "test-pass")
+    monkeypatch.setattr(settings, "payfast_sandbox", True)
+    checkout = client.post("/api/v1/billing/payfast/checkout", headers=headers)
+    assert checkout.status_code == 200
+    monkeypatch.setattr(billing_routes, "_payfast_source_allowed", lambda _address: True)
+
+    async def fake_confirm(_body, _sandbox):
+        return True
+
+    monkeypatch.setattr(billing_routes, "_confirm_payfast_itn", fake_confirm)
+    fields = {
+        "merchant_id": "10000100",
+        "m_payment_id": checkout.json()["payment_reference"],
+        "pf_payment_id": "1089260",
+        "payment_status": "COMPLETE",
+        "item_name": "VEXION monthly subscription",
+        "amount_gross": "499.00",
+    }
+    signature = generate_signature(fields, "test-pass", fields.keys())
+    payload = urlencode({**fields, "signature": signature})
+    response = client.post(
+        "/api/v1/billing/payfast/itn",
+        content=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "197.97.145.144"},
+    )
+    assert response.status_code == 400
+    assert "subscription token" in response.json()["detail"].lower()
