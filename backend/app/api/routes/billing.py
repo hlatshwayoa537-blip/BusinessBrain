@@ -1,15 +1,14 @@
 from datetime import datetime, timezone
-from decimal import Decimal
+import hashlib
 import ipaddress
 import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 from urllib.parse import parse_qsl
 
 import httpx
-from fastapi import Request
-from decimal import Decimal
-import hashlib
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
