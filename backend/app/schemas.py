@@ -24,6 +24,15 @@ class RegisterRequest(BaseModel):
             raise ValueError("Profile image must be a JPEG, PNG or WebP image.")
         return value
 
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: Annotated[str, StringConstraints(min_length=32, max_length=128)]
+    new_password: Password
+
+
 class LoginRequest(BaseModel):
     # Existing business owners may continue using email; staff can sign in with WhatsApp phone.
     identifier: str | None = Field(default=None, min_length=3, max_length=320)

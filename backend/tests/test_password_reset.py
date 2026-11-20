@@ -1,0 +1,119 @@
+import hashlib
+from datetime import datetime as RealDateTime, timedelta
+from urllib.parse import urlparse, parse_qs
+
+from sqlalchemy import select
+
+from app.api.routes import auth as auth_routes
+from app.db import get_db
+from app.main import app
+from app.models import UserActionToken
+
+
+def registration_payload(email="founder@example.com"):
+    return {
+        "full_name": "Test Founder",
+        "email": email,
+        "password": "A-strong-test-password-123",
+        "business_name": "Example Trading",
+        "industry": "Retail",
+        "country": "ZA",
+    }
+
+
+def test_password_reset_is_one_time_and_revokes_existing_access_tokens(client, monkeypatch):
+    monkeypatch.setattr(auth_routes.settings, "smtp_host", "smtp.example.co.za")
+    monkeypatch.setattr(auth_routes.settings, "smtp_from_email", "no-reply@example.co.za")
+    monkeypatch.setattr(auth_routes.settings, "app_env", "production")
+    monkeypatch.setattr(auth_routes.settings, "frontend_base_url", "http://localhost:5173")
+    monkeypatch.setattr(auth_routes.settings, "frontend_origins", "https://businessbrain-web.onrender.com")
+    sent = []
+
+    def fake_send(email, full_name, reset_url):
+        sent.append({"email": email, "full_name": full_name, "reset_url": reset_url})
+
+    monkeypatch.setattr(auth_routes, "send_password_reset_email", fake_send)
+    registration = client.post("/api/v1/auth/register", json=registration_payload())
+    assert registration.status_code == 201
+    old_access_token = registration.json()["access_token"]
+
+    request = client.post("/api/v1/auth/password-reset/request", json={"email": "FOUNDER@example.com"})
+    assert request.status_code == 202
+    assert request.json()["message"].startswith("If an active account exists")
+    assert sent[0]["email"] == "founder@example.com"
+    assert urlparse(sent[0]["reset_url"]).netloc == "businessbrain-web.onrender.com"
+    raw_token = parse_qs(urlparse(sent[0]["reset_url"]).fragment)["reset_token"][0]
+    assert len(raw_token) >= 32
+
+    db_generator = app.dependency_overrides[get_db]()
+    db = next(db_generator)
+    try:
+        stored_token = db.scalar(select(UserActionToken).where(UserActionToken.purpose == "password_reset"))
+        assert stored_token is not None
+        assert stored_token.token_hash == hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        assert stored_token.token_hash != raw_token
+    finally:
+        db_generator.close()
+
+    # A second request inside the throttle window does not create another token or send another email.
+    client.post("/api/v1/auth/password-reset/request", json={"email": "founder@example.com"})
+    assert len(sent) == 1
+
+    reset = client.post("/api/v1/auth/password-reset/confirm", json={
+        "token": raw_token,
+        "new_password": "A-new-strong-password-456",
+    })
+    assert reset.status_code == 200
+
+    old_session = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {old_access_token}"})
+    assert old_session.status_code == 401
+    assert client.post("/api/v1/auth/login", json={"email": "founder@example.com", "password": "A-strong-test-password-123"}).status_code == 401
+    new_login = client.post("/api/v1/auth/login", json={"email": "founder@example.com", "password": "A-new-strong-password-456"})
+    assert new_login.status_code == 200
+
+    reused = client.post("/api/v1/auth/password-reset/confirm", json={
+        "token": raw_token,
+        "new_password": "Another-strong-password-789",
+    })
+    assert reused.status_code == 400
+
+
+def test_password_reset_request_requires_smtp_configuration(client):
+    response = client.post("/api/v1/auth/password-reset/request", json={"email": "unknown@example.com"})
+    assert response.status_code == 503
+
+
+def test_password_reset_unknown_email_uses_same_generic_response(client, monkeypatch):
+    monkeypatch.setattr(auth_routes.settings, "smtp_host", "smtp.example.co.za")
+    monkeypatch.setattr(auth_routes.settings, "smtp_from_email", "no-reply@example.co.za")
+    sent = []
+    monkeypatch.setattr(auth_routes, "send_password_reset_email", lambda *_args: sent.append(True))
+    response = client.post("/api/v1/auth/password-reset/request", json={"email": "unknown@example.com"})
+    assert response.status_code == 202
+    assert response.json()["message"].startswith("If an active account exists")
+    assert sent == []
+
+
+
+def test_password_reset_expired_token_is_rejected(client, monkeypatch):
+    monkeypatch.setattr(auth_routes.settings, "smtp_host", "smtp.example.co.za")
+    monkeypatch.setattr(auth_routes.settings, "smtp_from_email", "no-reply@example.co.za")
+    sent = []
+    monkeypatch.setattr(auth_routes, "send_password_reset_email", lambda email, name, url: sent.append(url))
+    registration = client.post("/api/v1/auth/register", json=registration_payload("expired@example.com"))
+    assert registration.status_code == 201
+    client.post("/api/v1/auth/password-reset/request", json={"email": "expired@example.com"})
+    raw_token = parse_qs(urlparse(sent[0]).fragment)["reset_token"][0]
+
+    class FutureDateTime(RealDateTime):
+        @classmethod
+        def now(cls, tz=None):
+            return RealDateTime.now(tz) + timedelta(hours=1)
+
+    monkeypatch.setattr(auth_routes, "datetime", FutureDateTime)
+    response = client.post("/api/v1/auth/password-reset/confirm", json={
+        "token": raw_token,
+        "new_password": "A-new-strong-password-456",
+    })
+    assert response.status_code == 400
+    assert "expired" in response.json()["detail"]
