@@ -1,3 +1,4 @@
+import ReceivablesWorkspace from "./components/ReceivablesWorkspace";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Activity, AlertTriangle, ArrowUpRight, Bot, BriefcaseBusiness, Building2, ChartNoAxesCombined, ChevronRight, CircleHelp, CreditCard, FileText, LayoutDashboard, LockKeyhole, LogOut, Package, Settings2, ShieldCheck, Users } from "lucide-react";
@@ -1803,6 +1804,7 @@ export default function App() {
       <ReferralWorkspace session={session} />
       <SalesIntelligenceWorkspace session={session} />
       <InvoiceWorkspace session={session} />
+      <ReceivablesWorkspace session={session} />
       <InventoryWorkspace session={session} />
       <SupplierPurchasingWorkspace session={session} />
       <SupplierInvoiceMatchingWorkspace session={session} />

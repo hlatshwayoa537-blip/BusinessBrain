@@ -18,6 +18,7 @@ from app.api.routes.financial_reports import router as financial_reports_router
 from app.api.routes.business_intelligence import router as business_intelligence_router
 from app.api.routes.pos import router as pos_router
 from app.api.routes.invoices import router as invoices_router
+from app.api.routes.receivables import router as receivables_router
 from app.api.routes.daily_closes import router as daily_closes_router
 from app.api.routes.discrepancies import router as discrepancies_router
 from app.api.routes.discrepancy_evidence import router as discrepancy_evidence_router
@@ -69,6 +70,7 @@ app.include_router(financial_reports_router, prefix=settings.api_v1_prefix)
 app.include_router(business_intelligence_router, prefix=settings.api_v1_prefix)
 app.include_router(pos_router, prefix=settings.api_v1_prefix)
 app.include_router(invoices_router, prefix=settings.api_v1_prefix)
+app.include_router(receivables_router, prefix=settings.api_v1_prefix)
 app.include_router(daily_closes_router, prefix=settings.api_v1_prefix)
 app.include_router(discrepancies_router, prefix=settings.api_v1_prefix)
 app.include_router(discrepancy_evidence_router, prefix=settings.api_v1_prefix)
