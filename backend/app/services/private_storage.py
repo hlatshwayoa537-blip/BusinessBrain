@@ -81,22 +81,94 @@ def _valid_ooxml(data: bytes, extension: str) -> bool:
         return False
 
 
+def _valid_png(data: bytes) -> bool:
+    import zlib
+
+    signature = bytes.fromhex("89504e470d0a1a0a")
+    if not data.startswith(signature):
+        return False
+    offset = len(signature)
+    chunk_count = 0
+    seen_header = seen_image_data = seen_end = False
+    width = height = 0
+    while offset + 12 <= len(data):
+        chunk_count += 1
+        if chunk_count > 10_000:
+            return False
+        length = int.from_bytes(data[offset:offset + 4], "big")
+        chunk_type = data[offset + 4:offset + 8]
+        chunk_end = offset + 12 + length
+        if chunk_end > len(data):
+            return False
+        chunk_payload = data[offset + 8:offset + 8 + length]
+        expected_crc = int.from_bytes(data[offset + 8 + length:chunk_end], "big")
+        if zlib.crc32(chunk_type + chunk_payload) & 0xFFFFFFFF != expected_crc:
+            return False
+        if not seen_header:
+            if chunk_type != b"IHDR" or length != 13:
+                return False
+            width = int.from_bytes(chunk_payload[0:4], "big")
+            height = int.from_bytes(chunk_payload[4:8], "big")
+            if not (0 < width <= 50_000 and 0 < height <= 50_000 and width * height <= 100_000_000):
+                return False
+            seen_header = True
+        elif chunk_type == b"IHDR":
+            return False
+        if chunk_type == b"IDAT":
+            seen_image_data = True
+        if chunk_type == b"IEND":
+            if length != 0 or not seen_image_data:
+                return False
+            seen_end = True
+            offset = chunk_end
+            break
+        offset = chunk_end
+    return seen_header and seen_image_data and seen_end and offset == len(data)
+
+
+def _valid_jpeg(data: bytes) -> bool:
+    if len(data) < 12 or not data.startswith(bytes.fromhex("ffd8")) or not data.endswith(bytes.fromhex("ffd9")):
+        return False
+    offset = 2
+    found_frame = False
+    while offset < len(data) - 2:
+        if data[offset] != 0xFF:
+            return False
+        while offset < len(data) and data[offset] == 0xFF:
+            offset += 1
+        if offset >= len(data):
+            return False
+        marker = data[offset]
+        offset += 1
+        if marker in {0xD8, 0xD9} or 0xD0 <= marker <= 0xD7 or marker == 0x01:
+            continue
+        if offset + 2 > len(data):
+            return False
+        segment_length = int.from_bytes(data[offset:offset + 2], "big")
+        if segment_length < 2 or offset + segment_length > len(data):
+            return False
+        if marker in {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}:
+            if segment_length < 8:
+                return False
+            height = int.from_bytes(data[offset + 3:offset + 5], "big")
+            width = int.from_bytes(data[offset + 5:offset + 7], "big")
+            components = data[offset + 7]
+            if not (0 < width <= 50_000 and 0 < height <= 50_000 and width * height <= 100_000_000 and components > 0):
+                return False
+            found_frame = True
+        if marker == 0xDA:
+            return found_frame and data.endswith(bytes.fromhex("ffd9"))
+        offset += segment_length
+    return False
+
+
 def _matches_file_signature(data: bytes, extension: str) -> bool:
     if extension == ".pdf":
         return data[:1024].find(b"%PDF-") >= 0 and b"%%EOF" in data[-1024:]
     if extension == ".png":
-        if len(data) < 33 or not data.startswith(bytes.fromhex("89504e470d0a1a0a")):
-            return False
-        if data[8:12] != b"\x00\x00\x00\x0d" or data[12:16] != b"IHDR":
-            return False
-        import zlib
-        if zlib.crc32(data[12:29]) & 0xFFFFFFFF != int.from_bytes(data[29:33], "big"):
-            return False
-        width = int.from_bytes(data[16:20], "big")
-        height = int.from_bytes(data[20:24], "big")
-        return 0 < width <= 50_000 and 0 < height <= 50_000 and width * height <= 100_000_000
+        return _valid_png(data)
     if extension in {".jpg", ".jpeg"}:
-        return len(data) >= 4 and data.startswith(bytes.fromhex("ffd8ff")) and data.endswith(bytes.fromhex("ffd9"))
+        return _valid_jpeg(data)
     if extension in {".txt", ".csv"}:
         try:
             return b"\x00" not in data and bool(data.decode("utf-8-sig"))
