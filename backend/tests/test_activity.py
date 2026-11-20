@@ -59,8 +59,9 @@ def test_activity_feed_validates_date_range_and_supports_pagination(client):
 def test_activity_feed_is_restricted_to_business_managers(client):
     owner = register(client, "activity-manager@example.com", "Manager Store")
     from app.db import get_db
+    from app.main import app
     from app.models import Membership
-    db_generator = get_db()
+    db_generator = app.dependency_overrides[get_db]()
     db = next(db_generator)
     try:
         membership = db.query(Membership).filter_by(user_id=owner["user"]["id"]).first()
