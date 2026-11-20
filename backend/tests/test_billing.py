@@ -354,6 +354,64 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     assert after_cancel["referrals"][0]["status"] == "cancelled"
     assert client.get("/api/v1/billing/me", headers=headers).json()["subscription_status"] == "cancelled"
 
+    # A business may subscribe again after cancellation. A delayed cancellation
+    # from the old token must not cancel the new pending checkout.
+    new_checkout = client.post("/api/v1/billing/payfast/checkout", headers=headers)
+    assert new_checkout.status_code == 200
+    old_cancel_fields = {
+        "merchant_id": "10000100",
+        "m_payment_id": payment_reference,
+        "pf_payment_id": "1089254",
+        "payment_status": "CANCELLED",
+        "item_name": "VEXION monthly subscription",
+        "token": "dc0521d3-55fe-269b-fa00-b647310d760f",
+    }
+    old_cancel_signature = generate_signature(old_cancel_fields, "test-pass", old_cancel_fields.keys())
+    old_cancel_payload = urlencode({**old_cancel_fields, "signature": old_cancel_signature})
+    delayed_cancel = client.post(
+        "/api/v1/billing/payfast/itn",
+        content=old_cancel_payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "197.97.145.144"},
+    )
+    assert delayed_cancel.status_code == 200
+    assert delayed_cancel.json()["subscription_status"] == "pending"
+
+    new_token = "a3b3ae55-ab8b-b388-df23-4e6882b86ce0"
+    new_payment_fields = {
+        "merchant_id": "10000100",
+        "m_payment_id": new_checkout.json()["payment_reference"],
+        "pf_payment_id": "1089255",
+        "payment_status": "COMPLETE",
+        "item_name": "VEXION monthly subscription",
+        "amount_gross": "499.00",
+        "currency": "ZAR",
+        "token": new_token,
+    }
+    new_payment_signature = generate_signature(new_payment_fields, "test-pass", new_payment_fields.keys())
+    new_payment_payload = urlencode({**new_payment_fields, "signature": new_payment_signature})
+    reactivated = client.post(
+        "/api/v1/billing/payfast/itn",
+        content=new_payment_payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "197.97.145.144"},
+    )
+    assert reactivated.status_code == 200
+    assert reactivated.json()["subscription_status"] == "active"
+    reactivated_referral = client.get("/api/v1/referrals/me", headers=referrer_headers).json()
+    assert reactivated_referral["payment_verified_referrals"] == 1
+    assert reactivated_referral["referrals"][0]["status"] == "payment_verified"
+
+    from sqlalchemy import func, select
+    from app.db import get_db
+    from app.main import app
+    from app.models import PayFastCharge
+    db_generator = app.dependency_overrides[get_db]()
+    db = next(db_generator)
+    try:
+        charge_count = db.scalar(select(func.count(PayFastCharge.id)))
+    finally:
+        db_generator.close()
+    assert charge_count == 5
+
 
 
 def test_payfast_source_ip_uses_cloudflare_client_ip_not_spoofable_forwarded_for():
