@@ -289,7 +289,7 @@ def create_payfast_checkout(user: User = Depends(get_current_user), db: Session 
             sandbox=settings.payfast_sandbox,
             return_url=f"{base_url}/billing?payment=pending",
             cancel_url=f"{base_url}/billing?payment=cancelled",
-            notify_url=f"{settings.api_v1_prefix}/billing/payfast/itn",
+            notify_url=settings.api_base_url.rstrip("/") + f"{settings.api_v1_prefix}/billing/payfast/itn",
             payment_id=payment_reference,
             amount=amount,
             email=user.email,
@@ -318,6 +318,8 @@ async def receive_payfast_itn(request: Request, db: Session = Depends(get_db)) -
         raise HTTPException(status_code=400, detail="Invalid PayFast signature.")
     if data.get("merchant_id") != settings.payfast_merchant_id:
         raise HTTPException(status_code=400, detail="PayFast merchant ID mismatch.")
+    if data.get("currency") and data.get("currency") != "ZAR":
+        raise HTTPException(status_code=400, detail="Only ZAR PayFast payments are accepted.")
     if not _payfast_source_allowed(request.client.host if request.client else None):
         raise HTTPException(status_code=403, detail="PayFast notification source is not allowed.")
     if not _confirm_payfast_itn(raw_body, settings.payfast_sandbox):
