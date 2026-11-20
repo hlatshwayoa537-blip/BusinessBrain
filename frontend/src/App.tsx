@@ -20,7 +20,7 @@ type BusinessWorkspace = { id: string; name: string; industry: string; country: 
 const STORAGE_KEY = "businessbrain.session";
 const modules = [
   { icon: ChartNoAxesCombined, title: "Financial Intelligence", detail: "Understand your business finances", tag: "Available" },
-  { icon: FileText, title: "Invoices & Quotes", detail: "Create and manage business documents", tag: "Planned" },
+  { icon: FileText, title: "Invoices & Quotes", detail: "Create and track business invoices", tag: "Available" },
   { icon: Users, title: "Customers & CRM", detail: "Build stronger customer relationships", tag: "Planned" },
   { icon: Package, title: "Suppliers & Purchasing", detail: "Manage suppliers, purchase orders and goods received", tag: "Available" },
   { icon: BriefcaseBusiness, title: "People & Recruitment", detail: "Manage your team and hiring pipeline", tag: "Planned" },
