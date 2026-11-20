@@ -164,7 +164,7 @@ def billing_overview(user: User = Depends(get_current_user), db: Session = Depen
             and subscription.status == "active" and subscription.provider_subscription_reference
         ),
         "terminals": [terminal_payload(row) for row in terminals],
-        "notice": "No payment has been collected yet unless a PayFast notification has been verified. VEXION displays estimates using the current active POS count and referral eligibility; recurring price changes take effect only after PayFast confirms them.",
+        "notice": "no payment has been collected yet unless a PayFast notification has been verified. VEXION displays estimates using the current active POS count and referral eligibility; recurring price changes take effect only after PayFast confirms them.",
     }
 
 
