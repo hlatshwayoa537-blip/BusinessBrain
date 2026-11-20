@@ -197,7 +197,7 @@ def request_password_reset(payload: PasswordResetRequest, db: Session = Depends(
             )
             db.add(token_record)
             db.commit()
-            reset_url = f"{frontend_base_url}/?reset_token={quote(raw_token)}"
+            reset_url = f"{frontend_base_url}/#reset_token={quote(raw_token)}"
             try:
                 send_password_reset_email(user.email, user.full_name, reset_url)
             except Exception:
