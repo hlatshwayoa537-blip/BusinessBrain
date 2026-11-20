@@ -196,6 +196,7 @@ def test_payfast_checkout_creates_pending_payment_without_activating_subscriptio
     overview = client.get("/api/v1/billing/me", headers=headers).json()
     assert overview["subscription_status"] == "pending"
     assert overview["payment_status"] == "pending"
+    assert overview["checkout_available"] is True
 
 
 def test_payfast_checkout_requires_active_pos_terminal(client, monkeypatch):
@@ -278,6 +279,20 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     overview = client.get("/api/v1/billing/me", headers=headers).json()
     assert overview["subscription_status"] == "active"
     assert overview["payment_status"] == "paid"
+    assert overview["subscription_update_available"] is True
+
+    update_calls = []
+    def fake_recurring_update(**kwargs):
+        update_calls.append(kwargs)
+        return 49900
+    monkeypatch.setattr(billing_routes, "update_recurring_subscription_amount", fake_recurring_update)
+    price_update = client.post("/api/v1/billing/payfast/update-amount", headers=headers)
+    assert price_update.status_code == 200
+    assert price_update.json()["recurring_amount"] == "499.00"
+    assert price_update.json()["effective_for"] == "future recurring charges"
+    assert update_calls[0]["token"] == "sandbox-subscription-token"
+    assert update_calls[0]["amount"] == 499
+    assert update_calls[0]["sandbox"] is True
 
     duplicate = client.post(
         "/api/v1/billing/payfast/itn",

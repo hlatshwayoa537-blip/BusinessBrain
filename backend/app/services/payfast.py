@@ -118,3 +118,72 @@ def build_subscription_checkout(
     }
     fields["signature"] = generate_signature(fields, passphrase, CHECKOUT_FIELD_ORDER)
     return (CHECKOUT_URL_SANDBOX if sandbox else CHECKOUT_URL_LIVE), fields
+
+
+def _api_signature(fields: Mapping[str, object], passphrase: str) -> str:
+    """Build the PayFast REST API signature from sorted header/body parameters."""
+    parts = []
+    for key, value in sorted(fields.items(), key=lambda item: item[0]):
+        if key == "signature" or value is None or str(value).strip() == "":
+            continue
+        parts.append(f"{key}={_encode(value)}")
+    parts.append(f"passphrase={_encode(passphrase)}")
+    return hashlib.md5("&".join(parts).encode("utf-8")).hexdigest()
+
+
+def update_recurring_subscription_amount(
+    *,
+    token: str,
+    amount: Decimal | str | int,
+    merchant_id: str,
+    passphrase: str,
+    sandbox: bool,
+) -> int:
+    """Read the current PayFast amount, then update only if it differs.
+
+    PayFast expects the new recurring amount as integer cents. Its update
+    endpoint changes the subscription's future recurring charge; it does not
+    collect a payment immediately.
+    """
+    import httpx
+    from datetime import datetime, timezone
+
+    if not all((token, merchant_id, passphrase)):
+        raise ValueError("PayFast subscription credentials are incomplete.")
+    amount_cents = int((Decimal(str(amount)).quantize(Decimal("0.01")) * 100))
+    if amount_cents < 500:
+        raise ValueError("PayFast recurring subscriptions must be at least R5.00.")
+    base_url = f"https://api.payfast.co.za/subscriptions/{quote_plus(token, safe='')}"
+    query = "?testing=true" if sandbox else ""
+    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    auth = {"merchant-id": merchant_id.strip(), "version": "v1", "timestamp": timestamp}
+    headers = {**auth, "signature": _api_signature(auth, passphrase)}
+    try:
+        current_response = httpx.get(base_url + "/fetch" + query, headers=headers, timeout=15.0)
+        current_response.raise_for_status()
+        current_body = current_response.json()
+        current_amount = current_body.get("data", {}).get("response", {}).get("amount")
+        if current_body.get("status") != "success" or current_amount is None:
+            raise ValueError("PayFast did not return the current subscription amount.")
+        if int(current_amount) == amount_cents:
+            return amount_cents
+
+        body = {"amount": amount_cents}
+        update_auth = {**auth, **body}
+        update_headers = {**auth, "signature": _api_signature(update_auth, passphrase)}
+        updated_response = httpx.patch(
+            base_url + "/update" + query,
+            json=body,
+            headers=update_headers,
+            timeout=15.0,
+        )
+        updated_response.raise_for_status()
+        updated = updated_response.json()
+        updated_amount = updated.get("data", {}).get("response", {}).get("amount")
+        if updated.get("status") != "success" or updated_amount is None or int(updated_amount) != amount_cents:
+            raise ValueError("PayFast did not confirm the recurring amount update.")
+        return amount_cents
+    except httpx.HTTPError:
+        raise ValueError("PayFast subscription update is temporarily unavailable.") from None
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("PayFast returned an invalid subscription update response.") from None
