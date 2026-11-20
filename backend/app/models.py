@@ -430,7 +430,7 @@ class PayFastPayment(Base):
 
 class PayFastCharge(Base):
     __tablename__ = "payfast_charges"
-    __table_args__ = (UniqueConstraint("pf_payment_id", name="uq_payfast_charge_provider_payment"),)
+    __table_args__ = (UniqueConstraint("pf_payment_id", "payment_status", name="uq_payfast_charge_provider_event"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
     subscription_id: Mapped[str] = mapped_column(ForeignKey("business_subscriptions.id", ondelete="CASCADE"), nullable=False, index=True)
