@@ -3,6 +3,17 @@ from urllib.parse import urlparse, parse_qs
 from app.api.routes import auth as auth_routes
 
 
+def registration_payload(email="founder@example.com"):
+    return {
+        "full_name": "Test Founder",
+        "email": email,
+        "password": "A-strong-test-password-123",
+        "business_name": "Example Trading",
+        "industry": "Retail",
+        "country": "ZA",
+    }
+
+
 def test_password_reset_is_one_time_and_revokes_existing_access_tokens(client, monkeypatch):
     monkeypatch.setattr(auth_routes.settings, "smtp_host", "smtp.example.co.za")
     monkeypatch.setattr(auth_routes.settings, "smtp_from_email", "no-reply@example.co.za")
