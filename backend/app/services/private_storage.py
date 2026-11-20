@@ -261,3 +261,16 @@ def presigned_download(key: str, filename: str, content_type: str) -> str:
 
 def delete_object(key: str) -> None:
     s3_client().delete_object(Bucket=settings.s3_bucket, Key=key)
+
+
+
+def list_quarantine_objects_older_than(cutoff):
+    """Yield old quarantine keys; durable business-record prefixes are excluded."""
+    client = s3_client()
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=settings.s3_bucket, Prefix="quarantine/"):
+        for item in page.get("Contents", []):
+            key = item.get("Key")
+            modified = item.get("LastModified")
+            if key and modified and modified < cutoff:
+                yield key

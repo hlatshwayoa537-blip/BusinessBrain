@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     s3_secret_access_key: str = ""
     s3_upload_url_expire_seconds: int = 300
     s3_download_url_expire_seconds: int = 60
+    quarantine_upload_ttl_hours: int = 24
     clamav_host: str = ""
     clamav_port: int = 3310
     clamav_timeout_seconds: int = 60
