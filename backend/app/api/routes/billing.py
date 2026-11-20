@@ -18,7 +18,7 @@ from app.api.routes.auth import get_current_user
 from app.db import get_db
 from app.models import BusinessReferral, BusinessSubscription, BusinessPOSTerminal, Membership, POSConnection, POSTransaction, User, PayFastCharge, PayFastPayment
 from app.core.config import settings
-from app.services.payfast import build_subscription_checkout, update_recurring_subscription_amount, verify_itn_signature
+from app.services.payfast import build_subscription_checkout, cancel_recurring_subscription, update_recurring_subscription_amount, verify_itn_signature
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 STANDARD_PRICE = Decimal("499.00")
@@ -129,13 +129,18 @@ def billing_overview(user: User = Depends(get_current_user), db: Session = Depen
     if not subscription:
         subscription = BusinessSubscription(business_id=business_id)
         db.add(subscription)
-    subscription.active_pos_count = active_count
-    subscription.referral_discount_applied = discount_eligible
     subscription.unit_price = STANDARD_PRICE
     subscription.discounted_unit_price = REFERRAL_PRICE
-    subscription.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(subscription)
+    price_out_of_sync = bool(
+        subscription.status == "active"
+        and subscription.provider_subscription_reference
+        and (
+            active_count != subscription.active_pos_count
+            or discount_eligible != subscription.referral_discount_applied
+        )
+    )
     return {
         "currency": "ZAR",
         "subscription_status": subscription.status if subscription else "not_started",
@@ -150,12 +155,16 @@ def billing_overview(user: User = Depends(get_current_user), db: Session = Depen
         "standard_unit_price": str(STANDARD_PRICE),
         "referral_unit_price": str(REFERRAL_PRICE),
         "checkout_available": bool(settings.payfast_merchant_id and settings.payfast_merchant_key and settings.payfast_passphrase),
+        "subscription_price_out_of_sync": price_out_of_sync,
         "subscription_update_available": bool(
+            settings.payfast_merchant_id and settings.payfast_passphrase and price_out_of_sync
+        ),
+        "cancel_available": bool(
             settings.payfast_merchant_id and settings.payfast_passphrase
             and subscription.status == "active" and subscription.provider_subscription_reference
         ),
         "terminals": [terminal_payload(row) for row in terminals],
-        "notice": "no payment has been collected yet. PayFast subscriptions are only marked active after a verified payment notification. Pricing shown is calculated from the current active POS terminal count.",
+        "notice": "no payment has been collected yet unless a PayFast notification has been verified. VEXION displays estimates using the current active POS count and referral eligibility; recurring price changes take effect only after PayFast confirms them.",
     }
 
 
@@ -329,7 +338,9 @@ def create_payfast_checkout(user: User = Depends(get_current_user), db: Session 
 @router.post("/payfast/update-amount")
 def update_payfast_recurring_amount(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
     """Synchronize the active PayFast subscription to the business's current eligible monthly price."""
-    _, business_id = current_business(user, db)
+    membership, business_id = current_business(user, db)
+    if membership.role not in {"owner", "admin"}:
+        raise HTTPException(status_code=403, detail="Only a business owner or admin can change subscription billing.")
     if not settings.payfast_merchant_id or not settings.payfast_passphrase:
         raise HTTPException(status_code=503, detail="PayFast subscription API credentials are not configured.")
     subscription = db.scalar(select(BusinessSubscription).where(
@@ -351,6 +362,20 @@ def update_payfast_recurring_amount(user: User = Depends(get_current_user), db: 
     discounted = paid_referrals >= 5
     unit_price = REFERRAL_PRICE if discounted else STANDARD_PRICE
     target_amount = (unit_price * active_count).quantize(Decimal("0.01"))
+    if (
+        subscription.active_pos_count == active_count
+        and subscription.referral_discount_applied == discounted
+    ):
+        return {
+            "status": "already_synced",
+            "currency": "ZAR",
+            "recurring_amount": f"{target_amount:.2f}",
+            "unit_price_per_pos_month": str(unit_price),
+            "active_pos_terminals": active_count,
+            "verified_direct_referrals": paid_referrals,
+            "referral_discount_applied": discounted,
+            "effective_for": "future recurring charges",
+        }
     try:
         amount_cents = update_recurring_subscription_amount(
             token=subscription.provider_subscription_reference,
@@ -375,6 +400,45 @@ def update_payfast_recurring_amount(user: User = Depends(get_current_user), db: 
         "referral_discount_applied": discounted,
         "effective_for": "future recurring charges",
     }
+
+
+@router.post("/payfast/cancel")
+def cancel_payfast_subscription(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    """Cancel future PayFast subscription renewals after provider confirmation."""
+    membership, business_id = current_business(user, db)
+    if membership.role not in {"owner", "admin"}:
+        raise HTTPException(status_code=403, detail="Only a business owner or admin can cancel subscription billing.")
+    subscription = db.scalar(select(BusinessSubscription).where(
+        BusinessSubscription.business_id == business_id,
+    ))
+    if not subscription:
+        raise HTTPException(status_code=404, detail="No subscription exists for this business.")
+    if subscription.status == "cancelled":
+        return {"status": "cancelled", "already_cancelled": True}
+    if subscription.status != "active" or not subscription.provider_subscription_reference:
+        raise HTTPException(status_code=409, detail="An active PayFast subscription is required before it can be cancelled.")
+    if not settings.payfast_merchant_id or not settings.payfast_passphrase:
+        raise HTTPException(status_code=503, detail="PayFast subscription API credentials are not configured.")
+    try:
+        confirmed = cancel_recurring_subscription(
+            token=subscription.provider_subscription_reference,
+            merchant_id=settings.payfast_merchant_id,
+            passphrase=settings.payfast_passphrase,
+            sandbox=settings.payfast_sandbox,
+        )
+        if not confirmed:
+            raise ValueError("PayFast did not confirm subscription cancellation.")
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from None
+    subscription.status = "cancelled"
+    subscription.updated_at = datetime.now(timezone.utc)
+    referral = db.scalar(select(BusinessReferral).where(
+        BusinessReferral.referred_business_id == business_id,
+    ))
+    if referral and referral.status == "payment_verified":
+        referral.status = "cancelled"
+    db.commit()
+    return {"status": "cancelled", "already_cancelled": False}
 
 
 @router.post("/payfast/itn")
@@ -426,6 +490,12 @@ async def receive_payfast_itn(request: Request, db: Session = Depends(get_db)) -
         PayFastPayment.m_payment_id == payment_reference,
     )) if payment_reference else None
 
+    if not payment:
+        # PayFast may omit m_payment_id on recurring and cancellation ITNs.
+        # Recover the originating checkout by the persistent subscription token.
+        payment = db.scalar(select(PayFastPayment).where(
+            PayFastPayment.provider_subscription_token == subscription_token,
+        ))
     if payment:
         subscription = db.scalar(select(BusinessSubscription).where(
             BusinessSubscription.id == payment.subscription_id,
@@ -434,7 +504,10 @@ async def receive_payfast_itn(request: Request, db: Session = Depends(get_db)) -
         if not subscription:
             raise HTTPException(status_code=409, detail="Subscription record is unavailable.")
         if subscription.provider_subscription_reference and subscription.provider_subscription_reference != subscription_token:
-            raise HTTPException(status_code=409, detail="PayFast subscription token does not match this payment.")
+            # A historical token can still send delayed cancellation notifications
+            # after a new checkout has cleared the current token.
+            if payment_status != "CANCELLED" or subscription.status != "pending":
+                raise HTTPException(status_code=409, detail="PayFast subscription token does not match this payment.")
         if payment_status == "COMPLETE" and payment.status == "verified" and payment.pf_payment_id == provider_payment_id:
             return {"status": "accepted", "duplicate": True}
     else:

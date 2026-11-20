@@ -281,7 +281,7 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     overview = client.get("/api/v1/billing/me", headers=headers).json()
     assert overview["subscription_status"] == "active"
     assert overview["payment_status"] == "paid"
-    assert overview["subscription_update_available"] is True
+    assert overview["subscription_update_available"] is False
 
     update_calls = []
     def fake_recurring_update(**kwargs):
@@ -290,11 +290,10 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     monkeypatch.setattr(billing_routes, "update_recurring_subscription_amount", fake_recurring_update)
     price_update = client.post("/api/v1/billing/payfast/update-amount", headers=headers)
     assert price_update.status_code == 200
+    assert price_update.json()["status"] == "already_synced"
     assert price_update.json()["recurring_amount"] == "499.00"
     assert price_update.json()["effective_for"] == "future recurring charges"
-    assert update_calls[0]["token"] == "dc0521d3-55fe-269b-fa00-b647310d760f"
-    assert update_calls[0]["amount"] == 499
-    assert update_calls[0]["sandbox"] is True
+    assert update_calls == []
 
     duplicate = client.post(
         "/api/v1/billing/payfast/itn",
@@ -537,3 +536,163 @@ def test_payfast_checkout_uses_https_production_frontend_origin(client, monkeypa
     fields = response.json()["fields"]
     assert fields["return_url"].startswith("https://businessbrain-web.onrender.com/")
     assert fields["cancel_url"].startswith("https://businessbrain-web.onrender.com/")
+
+
+
+def test_billing_overview_preserves_provider_synced_recurring_amount(client, monkeypatch):
+    from urllib.parse import urlencode
+    from app.core.config import settings
+    from app.services.payfast import generate_signature
+    import app.api.routes.billing as billing_routes
+
+    headers = register_owner(client, "payfast-price-drift@example.com")
+    client.post("/api/v1/billing/terminals", headers=headers, json={
+        "external_terminal_id": "PF-PRICE-01", "display_name": "First till"
+    })
+    monkeypatch.setattr(settings, "payfast_merchant_id", "10000100")
+    monkeypatch.setattr(settings, "payfast_merchant_key", "merchant-key")
+    monkeypatch.setattr(settings, "payfast_passphrase", "test-pass")
+    monkeypatch.setattr(settings, "payfast_sandbox", True)
+    checkout = client.post("/api/v1/billing/payfast/checkout", headers=headers)
+    assert checkout.status_code == 200
+    monkeypatch.setattr(billing_routes, "_payfast_source_allowed", lambda _address: True)
+
+    async def fake_confirm(_body, _sandbox):
+        return True
+
+    monkeypatch.setattr(billing_routes, "_confirm_payfast_itn", fake_confirm)
+    token = "dc0521d3-55fe-269b-fa00-b647310d760f"
+    initial_fields = {
+        "merchant_id": "10000100",
+        "m_payment_id": checkout.json()["payment_reference"],
+        "pf_payment_id": "1090001",
+        "payment_status": "COMPLETE",
+        "item_name": "VEXION monthly subscription",
+        "amount_gross": "499.00",
+        "currency": "ZAR",
+        "token": token,
+    }
+    signature = generate_signature(initial_fields, "test-pass", initial_fields.keys())
+    initial_payload = urlencode({**initial_fields, "signature": signature})
+    initial = client.post(
+        "/api/v1/billing/payfast/itn",
+        content=initial_payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "197.97.145.144"},
+    )
+    assert initial.status_code == 200
+
+    client.post("/api/v1/billing/terminals", headers=headers, json={
+        "external_terminal_id": "PF-PRICE-02", "display_name": "Second till"
+    })
+    overview = client.get("/api/v1/billing/me", headers=headers).json()
+    assert overview["active_pos_terminals"] == 2
+    assert overview["estimated_monthly_total"] == "998.00"
+    assert overview["subscription_price_out_of_sync"] is True
+    assert overview["subscription_update_available"] is True
+
+    # The overview must not rewrite the last provider-confirmed amount. PayFast
+    # can legitimately charge the old R499 amount until its update is confirmed.
+    recurring_fields = {
+        "merchant_id": "10000100",
+        "pf_payment_id": "1090002",
+        "payment_status": "COMPLETE",
+        "item_name": "VEXION monthly subscription",
+        "amount_gross": "499.00",
+        "currency": "ZAR",
+        "token": token,
+    }
+    signature = generate_signature(recurring_fields, "test-pass", recurring_fields.keys())
+    recurring_payload = urlencode({**recurring_fields, "signature": signature})
+    recurring = client.post(
+        "/api/v1/billing/payfast/itn",
+        content=recurring_payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "197.97.145.144"},
+    )
+    assert recurring.status_code == 200
+    assert recurring.json()["recurring"] is True
+
+    monkeypatch.setattr(billing_routes, "update_recurring_subscription_amount", lambda **_kwargs: 99800)
+    updated = client.post("/api/v1/billing/payfast/update-amount", headers=headers)
+    assert updated.status_code == 200
+    after_update = client.get("/api/v1/billing/me", headers=headers).json()
+    assert after_update["subscription_price_out_of_sync"] is False
+    assert after_update["subscription_update_available"] is False
+
+    new_recurring_fields = {**recurring_fields, "pf_payment_id": "1090003", "amount_gross": "998.00"}
+    signature = generate_signature(new_recurring_fields, "test-pass", new_recurring_fields.keys())
+    new_recurring_payload = urlencode({**new_recurring_fields, "signature": signature})
+    new_recurring = client.post(
+        "/api/v1/billing/payfast/itn",
+        content=new_recurring_payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "197.97.145.144"},
+    )
+    assert new_recurring.status_code == 200
+
+
+def test_owner_can_cancel_payfast_subscription_only_after_provider_confirmation(client, monkeypatch):
+    from urllib.parse import urlencode
+    from app.core.config import settings
+    from app.services.payfast import generate_signature
+    import app.api.routes.billing as billing_routes
+
+    headers = register_owner(client, "payfast-cancel-api@example.com")
+    client.post("/api/v1/billing/terminals", headers=headers, json={
+        "external_terminal_id": "PF-CANCEL-01", "display_name": "Cancellation till"
+    })
+    monkeypatch.setattr(settings, "payfast_merchant_id", "10000100")
+    monkeypatch.setattr(settings, "payfast_merchant_key", "merchant-key")
+    monkeypatch.setattr(settings, "payfast_passphrase", "test-pass")
+    monkeypatch.setattr(settings, "payfast_sandbox", True)
+    checkout = client.post("/api/v1/billing/payfast/checkout", headers=headers)
+    assert checkout.status_code == 200
+    monkeypatch.setattr(billing_routes, "_payfast_source_allowed", lambda _address: True)
+
+    async def fake_confirm(_body, _sandbox):
+        return True
+
+    monkeypatch.setattr(billing_routes, "_confirm_payfast_itn", fake_confirm)
+    token = "dc0521d3-55fe-269b-fa00-b647310d760f"
+    fields = {
+        "merchant_id": "10000100",
+        "m_payment_id": checkout.json()["payment_reference"],
+        "pf_payment_id": "1090101",
+        "payment_status": "COMPLETE",
+        "item_name": "VEXION monthly subscription",
+        "amount_gross": "499.00",
+        "currency": "ZAR",
+        "token": token,
+    }
+    signature = generate_signature(fields, "test-pass", fields.keys())
+    payload = urlencode({**fields, "signature": signature})
+    activated = client.post(
+        "/api/v1/billing/payfast/itn",
+        content=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "197.97.145.144"},
+    )
+    assert activated.status_code == 200
+    assert client.get("/api/v1/billing/me", headers=headers).json()["cancel_available"] is True
+
+    def fail_cancel(**_kwargs):
+        raise ValueError("PayFast cancellation is unavailable.")
+
+    monkeypatch.setattr(billing_routes, "cancel_recurring_subscription", fail_cancel)
+    failed = client.post("/api/v1/billing/payfast/cancel", headers=headers)
+    assert failed.status_code == 502
+    assert client.get("/api/v1/billing/me", headers=headers).json()["payment_status"] == "paid"
+
+    calls = []
+    monkeypatch.setattr(
+        billing_routes,
+        "cancel_recurring_subscription",
+        lambda **kwargs: calls.append(kwargs) or True,
+    )
+    cancelled = client.post("/api/v1/billing/payfast/cancel", headers=headers)
+    assert cancelled.status_code == 200
+    assert cancelled.json()["already_cancelled"] is False
+    assert calls[0]["token"] == token
+    overview = client.get("/api/v1/billing/me", headers=headers).json()
+    assert overview["payment_status"] == "cancelled"
+    assert overview["cancel_available"] is False
+    duplicate = client.post("/api/v1/billing/payfast/cancel", headers=headers)
+    assert duplicate.status_code == 200
+    assert duplicate.json()["already_cancelled"] is True

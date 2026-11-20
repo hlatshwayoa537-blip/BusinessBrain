@@ -187,3 +187,36 @@ def update_recurring_subscription_amount(
         raise ValueError("PayFast subscription update is temporarily unavailable.") from None
     except (KeyError, TypeError, ValueError):
         raise ValueError("PayFast returned an invalid subscription update response.") from None
+
+
+
+def cancel_recurring_subscription(
+    *,
+    token: str,
+    merchant_id: str,
+    passphrase: str,
+    sandbox: bool,
+) -> bool:
+    """Cancel future PayFast subscription renewals after provider confirmation."""
+    import httpx
+    from datetime import datetime, timezone
+
+    if not all((token, merchant_id, passphrase)):
+        raise ValueError("PayFast subscription credentials are incomplete.")
+    base_url = f"https://api.payfast.co.za/subscriptions/{quote_plus(token, safe='')}"
+    query = "?testing=true" if sandbox else ""
+    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    auth = {"merchant-id": merchant_id.strip(), "version": "v1", "timestamp": timestamp}
+    headers = {**auth, "signature": _api_signature(auth, passphrase)}
+    try:
+        response = httpx.put(base_url + "/cancel" + query, headers=headers, timeout=15.0)
+        response.raise_for_status()
+        body = response.json()
+        result = body.get("data", {}).get("response")
+        if body.get("status") != "success" or result is not True:
+            raise ValueError("PayFast did not confirm subscription cancellation.")
+        return True
+    except httpx.HTTPError:
+        raise ValueError("PayFast subscription cancellation is temporarily unavailable.") from None
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("PayFast returned an invalid subscription cancellation response.") from None
