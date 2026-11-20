@@ -112,9 +112,9 @@ def build_subscription_checkout(
         "amount": recurring_amount,
         "item_name": item_name[:100],
         "subscription_type": "1",
+        "recurring_amount": recurring_amount,
         "frequency": str(frequency),
         "cycles": str(cycles),
-        "recurring_amount": recurring_amount,
     }
     fields["signature"] = generate_signature(fields, passphrase, CHECKOUT_FIELD_ORDER)
     return (CHECKOUT_URL_SANDBOX if sandbox else CHECKOUT_URL_LIVE), fields
