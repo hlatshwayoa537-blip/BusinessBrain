@@ -22,7 +22,7 @@ CHECKOUT_FIELD_ORDER = (
     "custom_int3", "custom_int4", "custom_int5", "custom_str1", "custom_str2",
     "custom_str3", "custom_str4", "custom_str5", "email_confirmation",
     "confirmation_address", "payment_method", "subscription_type", "billing_date",
-    " recurring_amount", "frequency", "cycles",
+    "recurring_amount", "frequency", "cycles",
 )
 
 
