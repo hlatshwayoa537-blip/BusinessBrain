@@ -18,7 +18,7 @@ from app.api.routes.auth import get_current_user
 from app.db import get_db
 from app.models import BusinessReferral, BusinessSubscription, BusinessPOSTerminal, Membership, POSConnection, POSTransaction, User, PayFastPayment
 from app.core.config import settings
-from app.services.payfast import build_subscription_checkout, verify_itn_signature
+from app.services.payfast import build_subscription_checkout, update_recurring_subscription_amount, verify_itn_signature
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 STANDARD_PRICE = Decimal("499.00")
@@ -149,6 +149,11 @@ def billing_overview(user: User = Depends(get_current_user), db: Session = Depen
         "estimated_monthly_total": str((unit_price * active_count).quantize(Decimal("0.01"))),
         "standard_unit_price": str(STANDARD_PRICE),
         "referral_unit_price": str(REFERRAL_PRICE),
+        "checkout_available": bool(settings.payfast_merchant_id and settings.payfast_merchant_key and settings.payfast_passphrase),
+        "subscription_update_available": bool(
+            settings.payfast_merchant_id and settings.payfast_passphrase
+            and subscription.status == "active" and subscription.provider_subscription_reference
+        ),
         "terminals": [terminal_payload(row) for row in terminals],
         "notice": "no payment has been collected yet. PayFast subscriptions are only marked active after a verified payment notification. Pricing shown is calculated from the current active POS terminal count.",
     }
@@ -298,6 +303,57 @@ def create_payfast_checkout(user: User = Depends(get_current_user), db: Session 
     db.commit()
     return {"checkout_url": checkout_url, "fields": fields, "payment_reference": payment_reference,
             "amount": str(amount), "currency": "ZAR", "status": "pending_verification"}
+
+
+@router.post("/payfast/update-amount")
+def update_payfast_recurring_amount(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    """Synchronize the active PayFast subscription to the business's current eligible monthly price."""
+    _, business_id = current_business(user, db)
+    if not settings.payfast_merchant_id or not settings.payfast_passphrase:
+        raise HTTPException(status_code=503, detail="PayFast subscription API credentials are not configured.")
+    subscription = db.scalar(select(BusinessSubscription).where(
+        BusinessSubscription.business_id == business_id,
+    ))
+    if not subscription or subscription.status != "active" or not subscription.provider_subscription_reference:
+        raise HTTPException(status_code=409, detail="An active PayFast subscription is required before its recurring price can be updated.")
+    sync_discovered_terminals(db, business_id)
+    active_count = db.scalar(select(func.count(BusinessPOSTerminal.id)).where(
+        BusinessPOSTerminal.business_id == business_id,
+        BusinessPOSTerminal.status == "active",
+    )) or 0
+    if active_count < 1:
+        raise HTTPException(status_code=400, detail="At least one active POS terminal is required to keep a subscription.")
+    paid_referrals = db.scalar(select(func.count(BusinessReferral.id)).where(
+        BusinessReferral.referrer_business_id == business_id,
+        BusinessReferral.status == "payment_verified",
+    )) or 0
+    discounted = paid_referrals >= 5
+    unit_price = REFERRAL_PRICE if discounted else STANDARD_PRICE
+    target_amount = (unit_price * active_count).quantize(Decimal("0.01"))
+    try:
+        amount_cents = update_recurring_subscription_amount(
+            token=subscription.provider_subscription_reference,
+            amount=target_amount,
+            merchant_id=settings.payfast_merchant_id,
+            passphrase=settings.payfast_passphrase,
+            sandbox=settings.payfast_sandbox,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from None
+    subscription.active_pos_count = active_count
+    subscription.referral_discount_applied = discounted
+    subscription.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return {
+        "status": "updated",
+        "currency": "ZAR",
+        "recurring_amount": f"{Decimal(amount_cents) / Decimal(100):.2f}",
+        "unit_price_per_pos_month": str(unit_price),
+        "active_pos_terminals": active_count,
+        "verified_direct_referrals": paid_referrals,
+        "referral_discount_applied": discounted,
+        "effective_for": "future recurring charges",
+    }
 
 
 @router.post("/payfast/itn")
