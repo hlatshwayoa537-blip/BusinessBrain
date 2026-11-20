@@ -177,3 +177,74 @@ def test_item_level_pos_sales_deduct_mapped_stock_once_and_refunds_do_not_restoc
     assert len(pos_movements) == 1
     assert pos_movements[0]["movement_type"] == "pos_sale"
     assert pos_movements[0]["quantity_delta"] == "-3.000"
+
+
+def test_linked_pos_refund_uses_provider_external_references_and_restocking(client):
+    headers = auth_headers(client, "pos-external-refund@example.com")
+    item = client.post("/api/v1/inventory/items", headers=headers, json={
+        "name": "Tea 1kg", "sku": "TEA-1KG", "unit": "bag"
+    }).json()
+    item_id = item["id"]
+    client.post(f"/api/v1/inventory/items/{item_id}/adjustments", headers=headers, json={
+        "quantity_delta": "10", "location": "Durban", "reason": "Opening count"
+    })
+    connection = create_pos_connection(client, headers).json()
+    secret = connection["webhook_secret"]
+    sale = {
+        "external_transaction_id": "TILL-RECEIPT-9001",
+        "branch_name": "Durban", "transaction_type": "sale",
+        "occurred_at": "2026-11-18T10:00:00+02:00", "currency": "ZAR",
+        "gross_amount": "100.00", "net_amount": "100.00",
+        "items": [{
+            "external_line_id": "TILL-LINE-1", "sku": "TEA-1KG",
+            "description": "Tea 1kg", "quantity": "2", "unit_price": "50.00",
+        }],
+    }
+    accepted_sale = client.post(f"/api/v1/pos/ingest/{connection['id']}", headers={"X-Vexion-Secret": secret}, json=sale)
+    assert accepted_sale.status_code == 201
+    assert accepted_sale.json()["items"][0]["external_line_id"] == "TILL-LINE-1"
+
+    refund = {
+        "external_transaction_id": "TILL-REFUND-9001",
+        "original_external_transaction_id": "TILL-RECEIPT-9001",
+        "branch_name": "Durban", "transaction_type": "refund",
+        "occurred_at": "2026-11-19T10:00:00+02:00", "currency": "ZAR",
+        "gross_amount": "50.00", "net_amount": "50.00",
+        "items": [{
+            "original_line_external_id": "TILL-LINE-1", "sku": "TEA-1KG",
+            "description": "Tea refund", "quantity": "1", "unit_price": "50.00", "restock": True,
+        }],
+    }
+    accepted_refund = client.post(f"/api/v1/pos/ingest/{connection['id']}", headers={"X-Vexion-Secret": secret}, json=refund)
+    assert accepted_refund.status_code == 201
+    assert accepted_refund.json()["items"][0]["original_line_id"] == accepted_sale.json()["items"][0]["id"]
+    stock = client.get("/api/v1/inventory/items", headers=headers)
+    assert stock.json()[0]["stock_total"] == "9.000"
+
+
+def test_linked_refunds_cannot_over_refund_unmapped_pos_line(client):
+    headers = auth_headers(client, "pos-over-refund@example.com")
+    connection = create_pos_connection(client, headers).json()
+    secret = connection["webhook_secret"]
+    sale = {
+        "external_transaction_id": "EXT-SALE-UNMAPPED",
+        "transaction_type": "sale", "occurred_at": "2026-11-18T10:00:00+02:00",
+        "currency": "ZAR", "gross_amount": "100.00", "net_amount": "100.00",
+        "items": [{"description": "Untracked service", "quantity": "2", "unit_price": "50.00", "external_line_id": "SERVICE-LINE-1"}],
+    }
+    assert client.post(f"/api/v1/pos/ingest/{connection['id']}", headers={"X-Vexion-Secret": secret}, json=sale).status_code == 201
+    first_refund = {
+        "external_transaction_id": "EXT-REFUND-1",
+        "original_external_transaction_id": "EXT-SALE-UNMAPPED",
+        "transaction_type": "refund", "occurred_at": "2026-11-19T10:00:00+02:00",
+        "currency": "ZAR", "gross_amount": "50.00", "net_amount": "50.00",
+        "items": [{"description": "Service refund", "quantity": "1", "unit_price": "50.00", "original_line_number": 1}],
+    }
+    accepted = client.post(f"/api/v1/pos/ingest/{connection['id']}", headers={"X-Vexion-Secret": secret}, json=first_refund)
+    assert accepted.status_code == 201
+    excess_refund = {
+        **first_refund, "external_transaction_id": "EXT-REFUND-2",
+        "items": [{"description": "Excess service refund", "quantity": "2", "unit_price": "50.00", "original_line_number": 1}],
+    }
+    rejected = client.post(f"/api/v1/pos/ingest/{connection['id']}", headers={"X-Vexion-Secret": secret}, json=excess_refund)
+    assert rejected.status_code == 422
