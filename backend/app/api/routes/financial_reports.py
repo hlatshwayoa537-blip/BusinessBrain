@@ -97,7 +97,7 @@ def profit_loss(
         "net_result_before_cogs": money(revenue - manual_expenses),
         "not_included": {"unpaid_manual_income": money(outstanding_income), "unpaid_manual_expenses": money(unpaid_expenses), "inventory_cost_of_goods_sold": None if cogs_complete else cogs_status},
         "source_counts": {"pos_transactions": len(pos), "manual_finance_records": len(manual)},
-        "data_quality": {"pos_feed_received": len(pos) > 0, "expenses_are_complete": False, "inventory_costing_status": cogs_status, "uncosted_pos_lines": costing["uncosted_line_count"], "pos_refund_transactions": costing["refund_transaction_count"], "note": "COGS is included only when every recorded POS sale line has a linked inventory item and receipt cost, and no POS refunds require cost reversal. Missing costs are never treated as zero. Supplier purchase orders are not treated as paid expenses."},
+        "data_quality": {"pos_feed_received": len(pos) > 0, "expenses_are_complete": False, "inventory_costing_status": cogs_status, "uncosted_pos_lines": costing["uncosted_line_count"], "pos_refund_transactions": costing["refund_transaction_count"], "manual_income_is_additive_to_pos_sales": True, "manual_income_note": "Paid manual income is added to POS sales. Record only income that is separate from POS takings in the manual finance ledger to avoid double-counting.", "note": "COGS is included only when every recorded POS sale line has a linked inventory item and receipt cost, and no POS refunds require cost reversal. Missing costs are never treated as zero. Supplier purchase orders are not treated as paid expenses."},
     }
 
 
@@ -124,7 +124,8 @@ def cash_flow(
             "manual_paid_expenses": money(paid_expenses),
             "net_recorded_flow": money(pos_inflows - pos_refunds + paid_income - paid_expenses),
         },
-        "bank_reconciliation": {"status": "not_connected", "balance": None, "message": "No bank feed or bank statement reconciliation is connected. POS takings are not represented as bank-settled funds."},
+        "bank_reconciliation": {"status": "csv_statement_reconciliation_separate", "balance": None, "message": "Bank statement CSV import and reconciliation are available in the separate Bank Reconciliation module, but statement balances and matches are not included in this cash-flow report. No live bank feed is connected. POS takings are not represented as bank-settled funds."},
+        "data_quality": {"bank_statement_csv_available": True, "bank_statement_csv_included": False, "manual_income_is_additive_to_pos_sales": True, "manual_income_note": "Paid manual income is added to POS sales. Record only income that is separate from POS takings in the manual finance ledger to avoid double-counting."},
         "source_counts": {"pos_transactions": len(pos), "manual_finance_records": len(manual)},
     }
 
