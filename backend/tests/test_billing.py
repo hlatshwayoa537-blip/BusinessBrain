@@ -229,7 +229,13 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     from app.services.payfast import generate_signature
     import app.api.routes.billing as billing_routes
 
-    headers = register_owner(client, "payfast-verified@example.com")
+    referrer_headers = register_owner(client, "payfast-referrer@example.com")
+    referral_code = client.get("/api/v1/referrals/me", headers=referrer_headers).json()["referral_code"]
+    referred_payload = registration_payload("payfast-verified@example.com")
+    referred_payload["referral_code"] = referral_code
+    referred = client.post("/api/v1/auth/register", json=referred_payload)
+    assert referred.status_code == 201
+    headers = {"Authorization": f"Bearer {referred.json()['access_token']}"}
     client.post("/api/v1/billing/terminals", headers=headers, json={
         "external_terminal_id": "PF-VERIFIED-01", "display_name": "Verified till"
     })
@@ -264,6 +270,11 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     )
     assert notification.status_code == 200
     assert notification.json()["payment_status"] == "verified"
+    assert notification.json()["referral_payment_verified"] is True
+    referral_dashboard = client.get("/api/v1/referrals/me", headers=referrer_headers).json()
+    assert referral_dashboard["payment_verified_referrals"] == 1
+    assert referral_dashboard["discount_eligible"] is False
+    assert referral_dashboard["referrals"][0]["status"] == "payment_verified"
     overview = client.get("/api/v1/billing/me", headers=headers).json()
     assert overview["subscription_status"] == "active"
     assert overview["payment_status"] == "paid"
