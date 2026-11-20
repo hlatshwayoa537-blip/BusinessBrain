@@ -249,7 +249,9 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     payment_reference = checkout.json()["payment_reference"]
 
     monkeypatch.setattr(billing_routes, "_payfast_source_allowed", lambda _address: True)
-    monkeypatch.setattr(billing_routes, "_confirm_payfast_itn", lambda _body, _sandbox: True)
+    async def fake_confirm(_body, _sandbox):
+        return True
+    monkeypatch.setattr(billing_routes, "_confirm_payfast_itn", fake_confirm)
     fields = {
         "merchant_id": "10000100",
         "m_payment_id": payment_reference,
@@ -267,7 +269,7 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     notification = client.post(
         "/api/v1/billing/payfast/itn",
         content=payload,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        headers={"Content-Type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "197.97.145.144"},
     )
     assert notification.status_code == 200
     assert notification.json()["payment_status"] == "verified"
@@ -297,7 +299,49 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     duplicate = client.post(
         "/api/v1/billing/payfast/itn",
         content=payload,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        headers={"Content-Type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "197.97.145.144"},
     )
     assert duplicate.status_code == 200
     assert duplicate.json()["duplicate"] is True
+
+
+
+def test_payfast_source_ip_uses_cloudflare_client_ip_not_spoofable_forwarded_for():
+    from starlette.requests import Request
+    from app.api.routes.billing import _payfast_request_ip
+
+    request = Request({
+        "type": "http",
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "https",
+        "path": "/api/v1/billing/payfast/itn",
+        "raw_path": b"/api/v1/billing/payfast/itn",
+        "query_string": b"",
+        "headers": [
+            (b"cf-connecting-ip", b"197.97.145.144"),
+            (b"x-forwarded-for", b"41.74.179.193, 203.0.113.10"),
+        ],
+        "client": ("10.0.0.10", 12345),
+        "server": ("vexion-api", 443),
+    })
+    assert _payfast_request_ip(request) == "197.97.145.144"
+
+
+def test_payfast_source_ip_fails_closed_when_cloudflare_header_is_malformed():
+    from starlette.requests import Request
+    from app.api.routes.billing import _payfast_request_ip, _payfast_source_allowed
+
+    request = Request({
+        "type": "http",
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "https",
+        "path": "/api/v1/billing/payfast/itn",
+        "raw_path": b"/api/v1/billing/payfast/itn",
+        "query_string": b"",
+        "headers": [(b"cf-connecting-ip", b"not-an-ip")],
+        "client": ("10.0.0.10", 12345),
+        "server": ("vexion-api", 443),
+    })
+    assert not _payfast_source_allowed(_payfast_request_ip(request))
