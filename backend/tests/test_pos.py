@@ -248,3 +248,74 @@ def test_linked_refunds_cannot_over_refund_unmapped_pos_line(client):
     }
     rejected = client.post(f"/api/v1/pos/ingest/{connection['id']}", headers={"X-Vexion-Secret": secret}, json=excess_refund)
     assert rejected.status_code == 422
+
+
+
+def test_pos_ingest_rejects_timezone_naive_timestamps(client):
+    headers = auth_headers(client, "pos-naive-time@example.com")
+    connection = create_pos_connection(client, headers).json()
+    payload = {
+        "external_transaction_id": "NAIVE-TIME-001",
+        "transaction_type": "sale",
+        "occurred_at": "2026-11-18T10:00:00",
+        "currency": "ZAR",
+        "gross_amount": "100.00",
+        "net_amount": "100.00",
+    }
+    response = client.post(
+        f"/api/v1/pos/ingest/{connection['id']}",
+        headers={"X-Vexion-Secret": connection["webhook_secret"]},
+        json=payload,
+    )
+    assert response.status_code == 422
+
+
+def test_pos_daily_analytics_groups_transactions_by_south_african_local_date(client):
+    headers = auth_headers(client, "pos-local-date@example.com")
+    connection = create_pos_connection(client, headers).json()
+    secret = connection["webhook_secret"]
+    base = {
+        "transaction_type": "sale",
+        "currency": "ZAR",
+        "gross_amount": "10.00",
+        "net_amount": "10.00",
+    }
+    for transaction_id, timestamp in [
+        ("LOCAL-DAY-1", "2026-11-18T21:30:00Z"),  # 23:30 in South Africa
+        ("LOCAL-DAY-2", "2026-11-18T22:30:00Z"),  # 00:30 on the next local day
+    ]:
+        response = client.post(
+            f"/api/v1/pos/ingest/{connection['id']}",
+            headers={"X-Vexion-Secret": secret},
+            json={**base, "external_transaction_id": transaction_id, "occurred_at": timestamp},
+        )
+        assert response.status_code == 201
+
+    report = client.get("/api/v1/pos/analytics/daily?days=365", headers=headers)
+    assert report.status_code == 200
+    items = {item["date"]: item for item in report.json()["items"]}
+    assert items["2026-11-18"]["sales"] == "10.00"
+    assert items["2026-11-19"]["sales"] == "10.00"
+
+
+def test_pos_csv_import_rejects_timezone_naive_rows(client):
+    headers = auth_headers(client, "pos-csv-naive-time@example.com")
+    connection = create_pos_connection(client, headers).json()
+    csv_text = "ID,Date,Gross,Net\nNAIVE-CSV,2026-11-18T10:00:00,100.00,100.00\n"
+    response = client.post(
+        f"/api/v1/pos/connections/{connection['id']}/import-csv",
+        headers=headers,
+        json={
+            "csv_text": csv_text,
+            "mapping": {
+                "external_transaction_id": "ID",
+                "occurred_at": "Date",
+                "gross_amount": "Gross",
+                "net_amount": "Net",
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["imported"] == 0
+    assert len(response.json()["rejected"]) == 1
+    assert "timezone offset" in response.json()["rejected"][0]["reason"]
