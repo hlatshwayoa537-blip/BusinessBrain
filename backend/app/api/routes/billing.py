@@ -82,9 +82,8 @@ def sync_discovered_terminals(db: Session, business_id: str) -> int:
             )
         )
         if existing:
-            # A previously discovered till remains active while its POS connection is enabled.
+            # Discovery refreshes descriptive metadata but never overrides a manual status decision.
             if existing.connection_id == connection_id:
-                existing.status = "active"
                 existing.display_name = till[:160]
                 existing.branch_name = branch[:160] if branch else None
             continue
