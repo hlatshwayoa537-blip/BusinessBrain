@@ -31,7 +31,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["business_id"], ["businesses.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["subscription_id"], ["business_subscriptions.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("pf_payment_id", name="uq_payfast_charge_provider_payment"),
+        sa.UniqueConstraint("pf_payment_id", "payment_status", name="uq_payfast_charge_provider_event"),
     )
     op.create_index("ix_payfast_charges_business_id", "payfast_charges", ["business_id"])
     op.create_index("ix_payfast_charges_subscription_id", "payfast_charges", ["subscription_id"])
