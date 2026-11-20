@@ -21,12 +21,20 @@ def validate(monkeypatch, payload, extension):
     private_storage.validate_object_content("quarantine/test", extension)
 
 
+def png_chunk(kind, payload):
+    crc = (zlib.crc32(kind + payload) & 0xFFFFFFFF).to_bytes(4, "big")
+    return len(payload).to_bytes(4, "big") + kind + payload + crc
+
+
 def make_png():
     signature = bytes.fromhex("89504e470d0a1a0a")
     ihdr_data = (1).to_bytes(4, "big") + (1).to_bytes(4, "big") + bytes([8, 2, 0, 0, 0])
-    ihdr = len(ihdr_data).to_bytes(4, "big") + b"IHDR" + ihdr_data
-    crc = (zlib.crc32(b"IHDR" + ihdr_data) & 0xFFFFFFFF).to_bytes(4, "big")
-    return signature + ihdr + crc
+    return (
+        signature
+        + png_chunk(b"IHDR", ihdr_data)
+        + png_chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00"))
+        + png_chunk(b"IEND", b"")
+    )
 
 
 def make_ooxml(extension):
@@ -56,9 +64,12 @@ def test_png_checks_real_signature_and_ihdr_integrity(monkeypatch):
 
 
 def test_jpeg_requires_soi_and_eoi_markers(monkeypatch):
-    validate(monkeypatch, bytes.fromhex("ffd8ff") + b"image-data" + bytes.fromhex("ffd9"), ".jpg")
+    sof = bytes.fromhex("ffc0") + bytes.fromhex("000b") + bytes([8, 0, 1, 0, 1, 1, 1, 0x11, 0])
+    sos = bytes.fromhex("ffda") + bytes.fromhex("0008") + bytes([1, 1, 0, 0, 0x3f, 0])
+    valid_jpeg = bytes.fromhex("ffd8") + sof + sos + b"\x00" + bytes.fromhex("ffd9")
+    validate(monkeypatch, valid_jpeg, ".jpg")
     with pytest.raises(HTTPException):
-        validate(monkeypatch, bytes.fromhex("ffd8ff") + b"truncated", ".jpg")
+        validate(monkeypatch, valid_jpeg[:-2], ".jpg")
 
 
 @pytest.mark.parametrize("extension", [".docx", ".xlsx", ".pptx"])
