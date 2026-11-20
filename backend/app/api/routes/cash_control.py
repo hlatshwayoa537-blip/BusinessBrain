@@ -175,7 +175,7 @@ def cash_control_overview(
                 "timing": "recorded_due_date",
             })
 
-    currency_set = set(ar_by_currency) | set(ap_by_currency) | set(manual_unpaid_by_currency) | set(known_cash_totals)
+    currency_set = set(ar_by_currency) | set(ap_by_currency) | set(manual_unpaid_by_currency) | set(known_cash_totals) | {account["currency"] for account in cash_accounts}
     summary = {}
     for currency in sorted(currency_set):
         known_accounts = [a for a in cash_accounts if a["currency"] == currency and a["balance"] is not None]
