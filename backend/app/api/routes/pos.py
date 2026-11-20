@@ -19,6 +19,7 @@ from app.schemas_pos import POSConnectionCreate, POSConnectionCreated, POSConnec
 
 router = APIRouter(prefix="/pos", tags=["POS integrations"])
 ZERO = Decimal("0.00")
+BUSINESS_TIMEZONE = "Africa/Johannesburg"
 
 def current_membership(user: User, db: Session) -> Membership:
     membership = get_business_membership(user, db)
@@ -104,9 +105,7 @@ def ingest_transaction(
         raise HTTPException(status_code=401, detail="Valid POS connection credentials are required.")
     if not hmac.compare_digest(connection.secret_hash, secret_digest(x_vexion_secret)):
         raise HTTPException(status_code=401, detail="Valid POS connection credentials are required.")
-    occurred_at = payload.occurred_at
-    if occurred_at.tzinfo is None:
-        occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+    occurred_at = payload.occurred_at.astimezone(timezone.utc)
     original_sale = None
     if payload.transaction_type == "refund" and (payload.original_transaction_id or payload.original_external_transaction_id):
         if payload.original_transaction_id and payload.original_external_transaction_id:
@@ -295,8 +294,19 @@ def daily_sales_analytics(
     membership = current_membership(user, db)
     require_reader(membership)
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    day_expr = func.date(POSTransaction.occurred_at)
-    rows = db.execute(select(day_expr, POSTransaction.transaction_type, func.sum(POSTransaction.net_amount), func.count(POSTransaction.id)).where(
+    # PostgreSQL converts the stored timestamptz into the requested business
+    # timezone before extracting its date. SQLite's test database stores UTC
+    # datetimes without tzinfo, so apply South Africa's fixed UTC+02:00 offset.
+    if db.get_bind().dialect.name == "sqlite":
+        day_expr = func.date(POSTransaction.occurred_at, "+2 hours")
+    else:
+        day_expr = func.date(func.timezone(BUSINESS_TIMEZONE, POSTransaction.occurred_at))
+    rows = db.execute(select(
+        day_expr,
+        POSTransaction.transaction_type,
+        func.sum(POSTransaction.net_amount),
+        func.count(POSTransaction.id),
+    ).where(
         POSTransaction.business_id == membership.business_id,
         POSTransaction.occurred_at >= since,
         POSTransaction.currency == currency.upper(),
@@ -466,9 +476,7 @@ def import_csv_transactions(
                 if exists:
                     duplicates += 1
                     continue
-                occurred_at = clean.occurred_at
-                if occurred_at.tzinfo is None:
-                    occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+                occurred_at = clean.occurred_at.astimezone(timezone.utc)
                 db.add(POSTransaction(
                     business_id=connection.business_id, connection_id=connection.id,
                     external_transaction_id=clean.external_transaction_id,
