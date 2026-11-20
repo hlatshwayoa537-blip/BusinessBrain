@@ -51,6 +51,8 @@ def test_profit_loss_and_cash_flow_use_paid_records_and_pos_ledger(client):
     assert data["net_result"] is None
     assert data["net_result_before_cogs"] == "260.00"
     assert data["gross_profit_status"] == "incomplete"
+    assert data["data_quality"]["manual_income_is_additive_to_pos_sales"] is True
+    assert "double-counting" in data["data_quality"]["manual_income_note"]
     assert data["not_included"]["unpaid_manual_income"] == "500.00"
     assert data["not_included"]["unpaid_manual_expenses"] == "90.00"
 
@@ -58,7 +60,11 @@ def test_profit_loss_and_cash_flow_use_paid_records_and_pos_ledger(client):
     assert cash.status_code == 200
     cash_data = cash.json()
     assert cash_data["recorded_operating_flows"]["net_recorded_flow"] == "260.00"
-    assert cash_data["bank_reconciliation"]["status"] == "not_connected"
+    assert cash_data["bank_reconciliation"]["status"] == "csv_statement_reconciliation_separate"
+    assert "CSV import and reconciliation are available" in cash_data["bank_reconciliation"]["message"]
+    assert cash_data["data_quality"]["bank_statement_csv_available"] is True
+    assert cash_data["data_quality"]["bank_statement_csv_included"] is False
+    assert cash_data["data_quality"]["manual_income_is_additive_to_pos_sales"] is True
     assert cash_data["bank_reconciliation"]["balance"] is None
 
 
