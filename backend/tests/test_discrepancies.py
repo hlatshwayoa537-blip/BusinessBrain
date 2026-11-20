@@ -181,7 +181,7 @@ def test_private_evidence_content_validation_checks_file_signature(monkeypatch):
         def get_object(self, **kwargs):
             return {"Body": io.BytesIO(self.payload)}
 
-    monkeypatch.setattr(private_storage, "s3_client", lambda: FakeS3(b"%PDF-1.7\\nvalid header"))
+    monkeypatch.setattr(private_storage, "s3_client", lambda: FakeS3(b"%PDF-1.7\nvalid header\n%%EOF"))
     private_storage.validate_object_content("quarantine/test", ".pdf")
 
     monkeypatch.setattr(private_storage, "s3_client", lambda: FakeS3(b"<html>not a pdf</html>"))

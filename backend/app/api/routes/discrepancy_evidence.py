@@ -109,9 +109,12 @@ def complete_evidence_upload(
         validate_object_content(evidence.storage_key, Path(evidence.original_filename).suffix.lower())
         scan_object_with_clamav(evidence.storage_key)
     except HTTPException as exc:
-        if exc.status_code == 422:
+        if exc.status_code in {413, 422}:
             evidence.status = "rejected"
-            add_event(db, item, user, "evidence_rejected", {"evidence_id": evidence.id, "reason": "evidence_validation_or_scan_failed"})
+            add_event(db, item, user, "evidence_rejected", {
+                "evidence_id": evidence.id,
+                "reason": "file_too_large" if exc.status_code == 413 else "evidence_validation_or_scan_failed",
+            })
             db.commit()
             try:
                 delete_object(evidence.storage_key)
