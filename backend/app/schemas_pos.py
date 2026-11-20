@@ -29,9 +29,9 @@ class POSIngestLine(BaseModel):
     description: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=240)]
     quantity: Decimal = Field(gt=0, max_digits=14, decimal_places=3)
     unit_price: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
-    external_line_id: str | None = Field(default=None, max_length=180)
+    external_line_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=180)] | None = None
     original_line_id: str | None = Field(default=None, max_length=36)
-    original_line_external_id: str | None = Field(default=None, max_length=180)
+    original_line_external_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=180)] | None = None
     original_line_number: int | None = Field(default=None, ge=1, le=200)
     restock: bool = False
 
@@ -54,7 +54,7 @@ class POSIngestTransaction(BaseModel):
     external_transaction_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=180)]
     # Legacy internal VEXION ID; external POS systems should use the external reference below.
     original_transaction_id: str | None = Field(default=None, max_length=36)
-    original_external_transaction_id: str | None = Field(default=None, max_length=180)
+    original_external_transaction_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=180)] | None = None
     branch_name: str | None = Field(default=None, max_length=160)
     till_name: str | None = Field(default=None, max_length=120)
     transaction_type: TransactionType
