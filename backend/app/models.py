@@ -246,11 +246,16 @@ class POSTransaction(Base):
 
 class POSTransactionLine(Base):
     __tablename__ = "pos_transaction_lines"
-    __table_args__ = (UniqueConstraint("transaction_id", "line_number", name="uq_pos_transaction_line_number"),)
+    __table_args__ = (
+        UniqueConstraint("transaction_id", "line_number", name="uq_pos_transaction_line_number"),
+        UniqueConstraint("transaction_id", "external_line_id", name="uq_pos_transaction_external_line"),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     transaction_id: Mapped[str] = mapped_column(ForeignKey("pos_transactions.id", ondelete="CASCADE"), nullable=False, index=True)
     business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
     line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    external_line_id: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    original_line_id: Mapped[str | None] = mapped_column(ForeignKey("pos_transaction_lines.id", ondelete="SET NULL"), nullable=True, index=True)
     sku: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     description: Mapped[str] = mapped_column(String(240), nullable=False)
     quantity: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False)

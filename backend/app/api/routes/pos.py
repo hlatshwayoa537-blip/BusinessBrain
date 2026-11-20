@@ -108,16 +108,30 @@ def ingest_transaction(
     if occurred_at.tzinfo is None:
         occurred_at = occurred_at.replace(tzinfo=timezone.utc)
     original_sale = None
-    if payload.transaction_type == "refund" and payload.original_transaction_id:
-        original_sale = db.scalar(select(POSTransaction).where(
-            POSTransaction.id == payload.original_transaction_id,
-            POSTransaction.business_id == connection.business_id,
-            POSTransaction.transaction_type == "sale",
-        ))
+    if payload.transaction_type == "refund" and (payload.original_transaction_id or payload.original_external_transaction_id):
+        if payload.original_transaction_id and payload.original_external_transaction_id:
+            raise HTTPException(status_code=422, detail="Provide only one original sale reference.")
+        if payload.original_external_transaction_id:
+            original_sale = db.scalar(select(POSTransaction).where(
+                POSTransaction.connection_id == connection.id,
+                POSTransaction.external_transaction_id == payload.original_external_transaction_id,
+                POSTransaction.business_id == connection.business_id,
+                POSTransaction.transaction_type == "sale",
+            ))
+        else:
+            original_sale = db.scalar(select(POSTransaction).where(
+                POSTransaction.id == payload.original_transaction_id,
+                POSTransaction.business_id == connection.business_id,
+                POSTransaction.transaction_type == "sale",
+            ))
         if not original_sale:
-            raise HTTPException(status_code=422, detail="The referenced original sale was not found in this business.")
-        if not payload.items or any(not item.original_line_id for item in payload.items):
-            raise HTTPException(status_code=422, detail="Each linked refund item must identify its original sale line.")
+            raise HTTPException(status_code=422, detail="The referenced original sale was not found in this POS connection.")
+        if not payload.items or any(
+            sum(bool(reference) for reference in (
+                item.original_line_id, item.original_line_external_id, item.original_line_number,
+            )) != 1 for item in payload.items
+        ):
+            raise HTTPException(status_code=422, detail="Each linked refund item must identify exactly one original sale line by VEXION ID, POS line ID or line number.")
     record = POSTransaction(
         id=str(uuid.uuid4()), business_id=connection.business_id, connection_id=connection.id,
         external_transaction_id=payload.external_transaction_id,
@@ -129,6 +143,7 @@ def ingest_transaction(
     )
     db.add(record)
     stock_location = (payload.branch_name or "").strip()[:120] or "Main"
+    pending_refund_quantities: dict[str, Decimal] = {}
     for line_number, item in enumerate(payload.items, start=1):
         sku = item.sku.strip() if item.sku and item.sku.strip() else None
         inventory_item = None
@@ -138,11 +153,43 @@ def ingest_transaction(
                 func.lower(InventoryItem.sku) == sku.lower(),
                 InventoryItem.is_active.is_(True),
             ))
+        original_line = None
+        if record.transaction_type == "refund" and original_sale:
+            original_line_query = select(POSTransactionLine).where(
+                POSTransactionLine.transaction_id == original_sale.id,
+                POSTransactionLine.business_id == connection.business_id,
+            )
+            if item.original_line_id:
+                original_line_query = original_line_query.where(POSTransactionLine.id == item.original_line_id)
+            elif item.original_line_external_id:
+                original_line_query = original_line_query.where(POSTransactionLine.external_line_id == item.original_line_external_id)
+            else:
+                original_line_query = original_line_query.where(POSTransactionLine.line_number == item.original_line_number)
+            original_line = db.scalar(original_line_query)
+            if not original_line:
+                raise HTTPException(status_code=422, detail="The referenced original sale line was not found.")
+            if (sku or None) != (original_line.sku or None) or (inventory_item.id if inventory_item else None) != original_line.inventory_item_id:
+                raise HTTPException(status_code=422, detail="Refund item SKU does not match the original sale line.")
+            already_refunded = db.scalar(
+                select(func.coalesce(func.sum(POSTransactionLine.quantity), 0))
+                .join(POSTransaction, POSTransaction.id == POSTransactionLine.transaction_id)
+                .where(
+                    POSTransactionLine.original_line_id == original_line.id,
+                    POSTransaction.business_id == connection.business_id,
+                    POSTransaction.transaction_type == "refund",
+                )
+            ) or Decimal("0")
+            total_refunded = Decimal(already_refunded) + pending_refund_quantities.get(original_line.id, ZERO) + item.quantity
+            if total_refunded > Decimal(original_line.quantity):
+                raise HTTPException(status_code=422, detail="Refund quantity exceeds the unreturned quantity on the original sale line.")
+            pending_refund_quantities[original_line.id] = pending_refund_quantities.get(original_line.id, ZERO) + item.quantity
         line_total = item.quantity * item.unit_price
         line = POSTransactionLine(
             id=str(uuid.uuid4()), transaction_id=record.id, business_id=connection.business_id,
-            line_number=line_number, sku=sku, description=item.description,
-            quantity=item.quantity, unit_price=item.unit_price, line_total=line_total,
+            line_number=line_number, external_line_id=item.external_line_id,
+            original_line_id=original_line.id if original_line else None,
+            sku=sku, description=item.description, quantity=item.quantity,
+            unit_price=item.unit_price, line_total=line_total,
             inventory_item_id=inventory_item.id if inventory_item else None,
         )
         db.add(line)
@@ -158,24 +205,6 @@ def ingest_transaction(
                 created_by_user_id=connection.created_by_user_id,
             ))
         elif record.transaction_type == "refund" and original_sale:
-            original_line = db.scalar(select(POSTransactionLine).where(
-                POSTransactionLine.id == item.original_line_id,
-                POSTransactionLine.transaction_id == original_sale.id,
-                POSTransactionLine.business_id == connection.business_id,
-            ))
-            if not original_line:
-                raise HTTPException(status_code=422, detail="A refund line does not belong to the referenced original sale.")
-            if (sku or None) != (original_line.sku or None) or (inventory_item.id if inventory_item else None) != original_line.inventory_item_id:
-                raise HTTPException(status_code=422, detail="Refund item SKU does not match the original sale line.")
-            already_returned = db.scalar(select(func.coalesce(func.sum(POSTransactionLine.quantity), 0)).select_from(InventoryMovement).join(
-                POSTransactionLine, InventoryMovement.source_line_id == POSTransactionLine.id,
-            ).where(
-                InventoryMovement.business_id == connection.business_id,
-                InventoryMovement.source_type == "pos_return",
-                InventoryMovement.source_id == original_line.id,
-            )) or Decimal("0")
-            if Decimal(already_returned) + item.quantity > Decimal(original_line.quantity):
-                raise HTTPException(status_code=422, detail="Refund quantity exceeds the unreturned quantity on the original sale line.")
             if inventory_item:
                 original_cost_movement = db.scalar(select(InventoryMovement).where(
                     InventoryMovement.business_id == connection.business_id,
