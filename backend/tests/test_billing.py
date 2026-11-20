@@ -401,6 +401,24 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     assert reactivated_referral["payment_verified_referrals"] == 1
     assert reactivated_referral["referrals"][0]["status"] == "payment_verified"
 
+    # Cancellation also works when PayFast omits m_payment_id.
+    final_cancel_fields = {
+        "merchant_id": "10000100",
+        "pf_payment_id": "1089256",
+        "payment_status": "CANCELLED",
+        "item_name": "VEXION monthly subscription",
+        "token": new_token,
+    }
+    final_cancel_signature = generate_signature(final_cancel_fields, "test-pass", final_cancel_fields.keys())
+    final_cancel_payload = urlencode({**final_cancel_fields, "signature": final_cancel_signature})
+    final_cancel = client.post(
+        "/api/v1/billing/payfast/itn",
+        content=final_cancel_payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "197.97.145.144"},
+    )
+    assert final_cancel.status_code == 200
+    assert final_cancel.json()["subscription_status"] == "cancelled"
+
     from sqlalchemy import func, select
     from app.db import get_db
     from app.main import app
@@ -411,7 +429,7 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
         charge_count = db.scalar(select(func.count(PayFastCharge.id)))
     finally:
         db_generator.close()
-    assert charge_count == 5
+    assert charge_count == 6
 
 
 
