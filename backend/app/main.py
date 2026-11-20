@@ -33,6 +33,7 @@ from app.api.routes.bank_reconciliation import router as bank_reconciliation_rou
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+logger.warning("VEXION startup diagnostic: app.main imported; route registration beginning")
 
 
 @asynccontextmanager
@@ -44,11 +45,13 @@ async def lifespan(app: FastAPI):
     if settings.app_env.lower() != "test":
         backend_dir = Path(__file__).resolve().parents[1]
         alembic_config = Config(str(backend_dir / "alembic.ini"))
+        logger.warning("VEXION startup diagnostic: beginning database schema migration")
         try:
             command.upgrade(alembic_config, "head")
         except Exception:
             logger.exception("Database schema migration failed during API startup")
             raise
+        logger.warning("VEXION startup diagnostic: database schema migration completed")
     yield
 
 
