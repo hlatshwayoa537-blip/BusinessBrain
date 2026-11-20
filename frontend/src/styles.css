@@ -261,3 +261,11 @@
   line-height: 1.5;
   padding: 12px 14px;
 }
+
+
+.billing-status-cancelled,
+.billing-status-failed {
+  border-color: rgba(248, 113, 113, 0.32);
+  color: #fca5a5;
+  background: rgba(248, 113, 113, 0.08);
+}
