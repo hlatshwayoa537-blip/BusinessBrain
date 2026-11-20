@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     clamav_port: int = 3310
     clamav_timeout_seconds: int = 60
     frontend_base_url: str = "http://localhost:5173"
+    api_base_url: str = "http://localhost:8000"
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
