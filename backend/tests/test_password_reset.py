@@ -35,7 +35,7 @@ def test_password_reset_is_one_time_and_revokes_existing_access_tokens(client, m
     assert request.json()["message"].startswith("If an active account exists")
     assert sent[0]["email"] == "founder@example.com"
     assert urlparse(sent[0]["reset_url"]).netloc == "businessbrain-web.onrender.com"
-    raw_token = parse_qs(urlparse(sent[0]["reset_url"]).query)["reset_token"][0]
+    raw_token = parse_qs(urlparse(sent[0]["reset_url"]).fragment)["reset_token"][0]
     assert len(raw_token) >= 32
 
     # A second request inside the throttle window does not create another token or send another email.
