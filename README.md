@@ -75,10 +75,9 @@ For automated tests, the test suite overrides the database dependency with an is
 
 ## Current build status
 
-Implemented: initial React dashboard shell, FastAPI health endpoint, registration, login, signed bearer tokens, authenticated user profile, user/business/owner-membership persistence and initial Alembic schema migration.
+VEXION has progressed beyond the initial authentication shell. The repository now contains business workspaces, POS ingestion and CSV imports, daily close, reconciliation and discrepancy workflows, supplier purchasing, inventory, expenses, bank-statement imports and matching, payables, receivables, cash control, financial reporting, business intelligence, referrals, subscription billing foundations, the Business Network, Deal Rooms, private document upload workflows and production readiness diagnostics.
 
-Not yet implemented: email verification, password reset, refresh-token rotation, team invitations, subscription assessment, business onboarding UI and production deployment. These must not be represented as live until implemented and tested.
-
+**Important:** a merged feature or green CI run does not prove a live third-party integration or real-world financial accuracy. The current verified implementation boundaries, external dependencies, known gaps and outstanding validation are tracked in [the VEXION release-readiness register](docs/RELEASE_READINESS.md).
 
 ## Business Network: private conversations and Deal Rooms
 
@@ -141,7 +140,7 @@ VEXION supports a provider-neutral transaction model. POS providers can connect 
 - `GET /api/v1/pos/transactions` — list recent business transactions.
 - `GET /api/v1/pos/summary` — aggregate sales, refunds, voids and net sales.
 
-Connector secrets are stored only as SHA-256 digests and are shown only when created or rotated. Ingestion is idempotent per connection and external transaction ID. POS actuals are kept separate from manually entered finance records to avoid double-counting. The current foundation does not itself provide vendor-specific adapters, CSV upload parsing, item-level stock feeds or a local agent installer.
+Connector secrets are stored only as SHA-256 digests and are shown only when created or rotated. Ingestion is idempotent per connection and external transaction ID. POS actuals are kept separate from manually entered finance records to avoid double-counting. A mapped CSV import path is also available for approved POS exports. The current implementation does not include a production-certified adapter for a named POS vendor, item-level stock feeds from a vendor, or a local agent installer.
 
 
 ## VEXION sales intelligence and invoices
