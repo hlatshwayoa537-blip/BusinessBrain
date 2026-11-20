@@ -85,7 +85,12 @@ def _matches_file_signature(data: bytes, extension: str) -> bool:
     if extension == ".pdf":
         return data[:1024].find(b"%PDF-") >= 0 and b"%%EOF" in data[-1024:]
     if extension == ".png":
-        if len(data) < 24 or not data.startswith(bytes.fromhex("89504e470d0a1a0a")):
+        if len(data) < 33 or not data.startswith(bytes.fromhex("89504e470d0a1a0a")):
+            return False
+        if data[8:12] != b"\x00\x00\x00\x0d" or data[12:16] != b"IHDR":
+            return False
+        import zlib
+        if zlib.crc32(data[12:29]) & 0xFFFFFFFF != int.from_bytes(data[29:33], "big"):
             return False
         width = int.from_bytes(data[16:20], "big")
         height = int.from_bytes(data[20:24], "big")
