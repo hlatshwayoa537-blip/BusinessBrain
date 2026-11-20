@@ -150,7 +150,7 @@ def billing_overview(user: User = Depends(get_current_user), db: Session = Depen
         "standard_unit_price": str(STANDARD_PRICE),
         "referral_unit_price": str(REFERRAL_PRICE),
         "terminals": [terminal_payload(row) for row in terminals],
-        "notice": "PayFast payments are only marked active after a verified payment notification. Pricing shown is calculated from the current active POS terminal count.",
+        "notice": "No payment has been collected yet. PayFast subscriptions are only marked active after a verified payment notification. Pricing shown is calculated from the current active POS terminal count.",
     }
 
 
