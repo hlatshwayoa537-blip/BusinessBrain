@@ -321,7 +321,7 @@ def test_bank_row_can_create_exact_paid_finance_entry_and_link_atomically(client
     imported = client.post(
         "/api/v1/bank-reconciliation/imports?account_label=Operating%20Account",
         headers={**headers, "Content-Type": "text/csv"},
-        content="date,description,amount,reference\\n2026-11-19,Monthly electricity,-850.00,ELEC-LEDGER-1\\n",
+        content="date,description,amount,reference\n2026-11-19,Monthly electricity,-850.00,ELEC-LEDGER-1\n",
     )
     assert imported.status_code == 201
     row = client.get("/api/v1/bank-reconciliation/transactions?reconciliation_status=unmatched", headers=headers).json()[0]
@@ -359,7 +359,7 @@ def test_bank_row_finance_creation_enforces_direction_currency_and_business_scop
     imported = client.post(
         "/api/v1/bank-reconciliation/imports?account_label=Operating%20Account",
         headers={**headers, "Content-Type": "text/csv"},
-        content="date,description,amount\\n2026-11-19,Customer deposit,250.00\\n",
+        content="date,description,amount\n2026-11-19,Customer deposit,250.00\n",
     )
     assert imported.status_code == 201
     row = client.get("/api/v1/bank-reconciliation/transactions?reconciliation_status=unmatched", headers=headers).json()[0]
