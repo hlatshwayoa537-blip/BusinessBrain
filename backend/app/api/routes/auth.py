@@ -168,9 +168,7 @@ def request_password_reset(payload: PasswordResetRequest, db: Session = Depends(
     # does not reveal whether a particular email address is registered.
     if not settings.smtp_host or not settings.smtp_from_email:
         raise HTTPException(status_code=503, detail="Password recovery email is not configured.")
-    frontend_base_url = settings.frontend_base_url.rstrip("/")
-    if settings.app_env.lower() == "production" and not frontend_base_url.startswith("https://"):
-        frontend_base_url = next((origin.rstrip("/") for origin in settings.cors_origins if origin.startswith("https://")), "")
+    frontend_base_url = settings.public_frontend_base_url
     if not frontend_base_url:
         raise HTTPException(status_code=503, detail="Password recovery link destination is not configured.")
     email = str(payload.email).strip().lower()
