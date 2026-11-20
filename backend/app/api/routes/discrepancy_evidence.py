@@ -1,3 +1,4 @@
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
@@ -19,6 +20,16 @@ from app.services.private_storage import (
 )
 
 router = APIRouter(prefix="/discrepancies", tags=["discrepancy evidence"])
+logger = logging.getLogger(__name__)
+
+
+def _delete_rejected_object(key: str, evidence_id: str) -> None:
+    try:
+        delete_object(key)
+    except Exception:
+        # The record remains rejected and cannot be downloaded. Keep a clear
+        # operational signal so a failed object deletion can be remediated.
+        logger.exception("Could not delete rejected evidence object (evidence_id=%s)", evidence_id)
 MAX_FILE_BYTES = 25 * 1024 * 1024
 ALLOWED_TYPES = {
     ".pdf": {"application/pdf"},
@@ -100,10 +111,7 @@ def complete_evidence_upload(
         evidence.status = "rejected"
         add_event(db, item, user, "evidence_rejected", {"evidence_id": evidence.id, "reason": "metadata_mismatch"})
         db.commit()
-        try:
-            delete_object(evidence.storage_key)
-        except Exception:
-            pass
+        _delete_rejected_object(evidence.storage_key, evidence.id)
         raise HTTPException(status_code=422, detail="Uploaded file size or content type does not match the request.")
     try:
         validate_object_content(evidence.storage_key, Path(evidence.original_filename).suffix.lower())
@@ -116,15 +124,18 @@ def complete_evidence_upload(
                 "reason": "file_too_large" if exc.status_code == 413 else "evidence_validation_or_scan_failed",
             })
             db.commit()
-            try:
-                delete_object(evidence.storage_key)
-            except Exception:
-                pass
+            _delete_rejected_object(evidence.storage_key, evidence.id)
         raise
     final_key = f"discrepancies/{membership.business_id}/{item.id}/{evidence.id}"
     promote_clean_object(evidence.storage_key, final_key)
     promoted = object_head(final_key)
     if int(promoted.get("ContentLength", 0)) != evidence.size_bytes or promoted.get("ContentType") != evidence.content_type:
+        evidence.status = "rejected"
+        add_event(db, item, user, "evidence_rejected", {
+            "evidence_id": evidence.id, "reason": "promoted_metadata_mismatch",
+        })
+        db.commit()
+        _delete_rejected_object(final_key, evidence.id)
         raise HTTPException(status_code=503, detail="The scanned evidence could not be verified in private storage. It has not been made available.")
     evidence.storage_key = final_key
     evidence.status = "clean"
