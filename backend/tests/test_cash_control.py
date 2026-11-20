@@ -47,7 +47,7 @@ def test_cash_control_does_not_reuse_old_balance_when_latest_row_has_no_balance(
     )
     imported = client.post(
         "/api/v1/bank-reconciliation/imports?account_label=Main%20Business%20Account&filename=statement.csv",
-        headers={**auth, "Content-Type": "text/csv"}, data=csv_data,
+        headers={**auth, "Content-Type": "text/csv"}, content=csv_data,
     )
     assert imported.status_code == 201, imported.text
     data = client.get("/api/v1/cash-control/overview", headers=auth).json()
