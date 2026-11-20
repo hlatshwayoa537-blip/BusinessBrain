@@ -220,18 +220,34 @@ def _payfast_source_allowed(remote_addr: str | None) -> bool:
     return any(address in network for network in PAYFAST_ALLOWED_NETWORKS)
 
 
-def _confirm_payfast_itn(raw_body: bytes, sandbox: bool) -> bool:
+def _payfast_request_ip(request: Request) -> str | None:
+    """Return the visitor IP supplied by Render's Cloudflare edge.
+
+    Render routes public inbound traffic through Cloudflare. Cloudflare
+    overwrites CF-Connecting-IP with the connecting visitor IP; unlike
+    X-Forwarded-For, it is a single address and is not parsed from a
+    client-controlled proxy chain. If the header is absent (for example in
+    local development), retain the direct peer address; on Render this will
+    not match PayFast's allowlist and therefore fails closed.
+    """
+    cloudflare_ip = request.headers.get("cf-connecting-ip")
+    if cloudflare_ip is not None:
+        return cloudflare_ip.strip()
+    return request.client.host if request.client else None
+
+
+async def _confirm_payfast_itn(raw_body: bytes, sandbox: bool) -> bool:
     endpoint = (
         "https://sandbox.payfast.co.za/eng/query/validate"
         if sandbox else "https://www.payfast.co.za/eng/query/validate"
     )
     try:
-        response = httpx.post(
-            endpoint,
-            content=raw_body,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=15.0,
-        )
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                endpoint,
+                content=raw_body,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
         return response.status_code == 200 and response.text.strip() == "VALID"
     except httpx.HTTPError:
         raise HTTPException(status_code=503, detail="PayFast verification is temporarily unavailable.") from None
@@ -374,9 +390,9 @@ async def receive_payfast_itn(request: Request, db: Session = Depends(get_db)) -
         raise HTTPException(status_code=400, detail="PayFast merchant ID mismatch.")
     if data.get("currency") and data.get("currency") != "ZAR":
         raise HTTPException(status_code=400, detail="Only ZAR PayFast payments are accepted.")
-    if not _payfast_source_allowed(request.client.host if request.client else None):
+    if not _payfast_source_allowed(_payfast_request_ip(request)):
         raise HTTPException(status_code=403, detail="PayFast notification source is not allowed.")
-    if not _confirm_payfast_itn(raw_body, settings.payfast_sandbox):
+    if not await _confirm_payfast_itn(raw_body, settings.payfast_sandbox):
         raise HTTPException(status_code=400, detail="PayFast could not validate this notification.")
     payment_reference = data.get("m_payment_id", "")
     payment = db.scalar(select(PayFastPayment).where(PayFastPayment.m_payment_id == payment_reference))
