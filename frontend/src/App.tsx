@@ -1298,7 +1298,7 @@ function SupplierPayablesWorkspace({session}:{session:AuthData}) {
     if(!response.ok)throw new Error(data?.detail||"Accounts payable request failed.");
     return data;
   }
-  async function refresh(){try{setRows(await request("/supplier-invoices/payables") as SupplierPayable[]);}catch(e){setError(e instanceof Error?e.message:"Could not load supplier payables.");}}
+  async function refresh(){try{setRows(await request("/supplier-invoices/payables/list") as SupplierPayable[]);}catch(e){setError(e instanceof Error?e.message:"Could not load supplier payables.");}}
   useEffect(()=>{void refresh();},[session.access_token]);
   async function recordPayment(row:SupplierPayable){
     const amount=amounts[row.invoice_id]||"";
