@@ -47,7 +47,7 @@ export default function ReceivablesWorkspace({session}:{session:Session}) {
     if(!amount||Number(amount)<=0)return;
     setBusy(invoice.id);setError("");setMessage("");
     try {
-      const result=await request("/receivables/invoices/"+invoice.id+"/receipts","POST",{
+      await request("/receivables/invoices/"+invoice.id+"/receipts","POST",{
         amount,payment_date:dates[invoice.id]||today,payment_method:methods[invoice.id]||"eft",
         reference:references[invoice.id]||null,idempotency_key:"vexion-customer-"+crypto.randomUUID()
       });
