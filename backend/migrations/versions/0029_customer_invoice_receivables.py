@@ -2,7 +2,7 @@
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0029_customer_invoice_receivables"
+revision = "0029_customer_receivables"
 down_revision = "0028_supplier_invoice_payables"
 branch_labels = None
 depends_on = None
