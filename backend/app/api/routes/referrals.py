@@ -82,7 +82,7 @@ def my_referrals(current_user: User = Depends(get_current_user), db: Session = D
             "standard_price_per_pos_month": 499,
             "qualified_price_per_pos_month": 399,
             "qualification": "Five directly referred businesses with verified subscription payments.",
-            "payment_verification_available": False,
-            "note": "Referral registrations are tracked, but VEXION does not yet have a subscription payment integration. No referral is counted as payment-verified and no R399 discount is activated automatically.",
+            "payment_verification_available": True,
+            "note": "A referral counts only after the referred business completes a PayFast subscription payment verified by VEXION. Five verified direct referrals qualify the referrer for R399 per active POS terminal on the next eligible subscription checkout. Existing active subscriptions require a recurring-price update before the lower amount is charged.",
         },
     }
