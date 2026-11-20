@@ -6,7 +6,6 @@ import secrets
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
-from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -20,7 +19,7 @@ from app.schemas_pos import POSConnectionCreate, POSConnectionCreated, POSConnec
 
 router = APIRouter(prefix="/pos", tags=["POS integrations"])
 ZERO = Decimal("0.00")
-BUSINESS_TZ = ZoneInfo("Africa/Johannesburg")
+BUSINESS_TIMEZONE = "Africa/Johannesburg"
 
 def current_membership(user: User, db: Session) -> Membership:
     membership = get_business_membership(user, db)
@@ -295,27 +294,34 @@ def daily_sales_analytics(
     membership = current_membership(user, db)
     require_reader(membership)
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    rows = db.scalars(select(POSTransaction).where(
+    # PostgreSQL converts the stored timestamptz into the requested business
+    # timezone before extracting its date. SQLite's test database stores UTC
+    # datetimes without tzinfo, so apply South Africa's fixed UTC+02:00 offset.
+    if db.get_bind().dialect.name == "sqlite":
+        day_expr = func.date(POSTransaction.occurred_at, "+2 hours")
+    else:
+        day_expr = func.date(func.timezone(BUSINESS_TIMEZONE, POSTransaction.occurred_at))
+    rows = db.execute(select(
+        day_expr,
+        POSTransaction.transaction_type,
+        func.sum(POSTransaction.net_amount),
+        func.count(POSTransaction.id),
+    ).where(
         POSTransaction.business_id == membership.business_id,
         POSTransaction.occurred_at >= since,
         POSTransaction.currency == currency.upper(),
-    )).all()
+    ).group_by(day_expr, POSTransaction.transaction_type).order_by(day_expr)).all()
     grouped = {}
-    for transaction in rows:
-        occurred_at = transaction.occurred_at
-        # PostgreSQL returns timezone-aware UTC values. SQLite drops tzinfo in
-        # tests, so treat those stored-naive values as UTC before local grouping.
-        if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
-            occurred_at = occurred_at.replace(tzinfo=timezone.utc)
-        day_key = occurred_at.astimezone(BUSINESS_TZ).date().isoformat()
+    for day_value, kind, total, count in rows:
+        day_key = day_value.isoformat() if hasattr(day_value, "isoformat") else str(day_value)
         item = grouped.setdefault(day_key, {"date": day_key, "sales": Decimal("0.00"), "refunds": Decimal("0.00"), "net_sales": Decimal("0.00"), "transaction_count": 0, "void_count": 0})
-        item["transaction_count"] += 1
-        if transaction.transaction_type == "sale":
-            item["sales"] += Decimal(transaction.net_amount or 0)
-        elif transaction.transaction_type == "refund":
-            item["refunds"] += Decimal(transaction.net_amount or 0)
-        elif transaction.transaction_type == "void":
-            item["void_count"] += 1
+        item["transaction_count"] += count
+        if kind == "sale":
+            item["sales"] += Decimal(total or 0)
+        elif kind == "refund":
+            item["refunds"] += Decimal(total or 0)
+        elif kind == "void":
+            item["void_count"] += count
     output = []
     for day_key in sorted(grouped):
         item = grouped[day_key]
