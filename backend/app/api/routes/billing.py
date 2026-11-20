@@ -258,6 +258,9 @@ def create_payfast_checkout(user: User = Depends(get_current_user), db: Session 
     _, business_id = current_business(user, db)
     if not all((settings.payfast_merchant_id, settings.payfast_merchant_key, settings.payfast_passphrase)):
         raise HTTPException(status_code=503, detail="PayFast merchant credentials are not configured.")
+    base_url = settings.public_frontend_base_url
+    if not base_url:
+        raise HTTPException(status_code=503, detail="Production frontend URL is not configured.")
     sync_discovered_terminals(db, business_id)
     terminals = db.scalars(select(BusinessPOSTerminal).where(
         BusinessPOSTerminal.business_id == business_id,
