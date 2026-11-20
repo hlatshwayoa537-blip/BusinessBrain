@@ -168,6 +168,11 @@ def request_password_reset(payload: PasswordResetRequest, db: Session = Depends(
     # does not reveal whether a particular email address is registered.
     if not settings.smtp_host or not settings.smtp_from_email:
         raise HTTPException(status_code=503, detail="Password recovery email is not configured.")
+    frontend_base_url = settings.frontend_base_url.rstrip("/")
+    if settings.app_env.lower() == "production" and frontend_base_url.startswith(("http://localhost", "http://127.0.0.1")):
+        frontend_base_url = next((origin.rstrip("/") for origin in settings.cors_origins if origin.startswith("https://")), "")
+    if not frontend_base_url:
+        raise HTTPException(status_code=503, detail="Password recovery link destination is not configured.")
     email = str(payload.email).strip().lower()
     user = db.scalar(select(User).where(User.email == email))
     now = datetime.now(timezone.utc)
@@ -192,7 +197,7 @@ def request_password_reset(payload: PasswordResetRequest, db: Session = Depends(
             )
             db.add(token_record)
             db.commit()
-            reset_url = f"{settings.frontend_base_url.rstrip('/')}/?reset_token={quote(raw_token)}"
+            reset_url = f"{frontend_base_url}/?reset_token={quote(raw_token)}"
             try:
                 send_password_reset_email(user.email, user.full_name, reset_url)
             except Exception:
