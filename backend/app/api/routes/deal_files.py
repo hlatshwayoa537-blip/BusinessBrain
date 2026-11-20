@@ -13,7 +13,7 @@ from app.api.business_context import get_business_membership
 from app.api.routes.auth import get_current_user
 from app.db import get_db
 from app.models import Business, BusinessConversation, DealRoom, DealRoomFile, Membership, User
-from app.services.private_storage import delete_object, object_head, presigned_download, presigned_upload, promote_clean_object, scan_object_with_clamav
+from app.services.private_storage import delete_object, object_head, presigned_download, presigned_upload, promote_clean_object, scan_object_with_clamav, validate_object_content
 
 router = APIRouter(prefix="/network", tags=["deal room documents"])
 MAX_FILE_BYTES = 25 * 1024 * 1024
@@ -102,16 +102,30 @@ def complete_upload(file_id: str, current_user: User = Depends(get_current_user)
         except Exception: pass
         raise HTTPException(status_code=422, detail="Uploaded file size or content type does not match the upload request.")
     try:
+        # Deal Room files must pass the same content/signature checks as
+        # discrepancy evidence before the malware scanner can approve them.
+        validate_object_content(item.storage_key, Path(item.original_filename).suffix.lower())
         scan_object_with_clamav(item.storage_key)
     except HTTPException as exc:
-        if exc.status_code == 422:
+        if exc.status_code in {413, 422}:
             item.status = "rejected"
             db.commit()
-            try: delete_object(item.storage_key)
-            except Exception: pass
+            try:
+                delete_object(item.storage_key)
+            except Exception:
+                pass
         raise
     final_key = f"deal-rooms/{item.deal_room_id}/{item.id}"
     promote_clean_object(item.storage_key, final_key)
+    promoted = object_head(final_key)
+    if int(promoted.get("ContentLength", 0)) != int(item.size_bytes) or promoted.get("ContentType") != item.content_type:
+        item.status = "rejected"
+        db.commit()
+        try:
+            delete_object(final_key)
+        except Exception:
+            pass
+        raise HTTPException(status_code=503, detail="The scanned document could not be verified in private storage. It has not been made available.")
     item.storage_key = final_key
     item.status = "clean"
     item.scanned_at = datetime.now(timezone.utc)
