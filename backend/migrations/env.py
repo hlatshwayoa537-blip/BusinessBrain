@@ -55,6 +55,14 @@ def run_migrations_online() -> None:
                 )
                 lock_acquired = True
                 logger.warning("VEXION migration diagnostic: advisory lock acquired")
+                # The SELECT above triggers SQLAlchemy autobegin. Clear that
+                # implicit transaction before Alembic creates its migration
+                # transaction; the session-level advisory lock survives commit.
+                if connection.in_transaction():
+                    connection.commit()
+                    logger.warning(
+                        "VEXION migration diagnostic: cleared advisory-lock query transaction"
+                    )
             context.configure(connection=connection, target_metadata=target_metadata)
             logger.warning("VEXION migration diagnostic: running Alembic migrations")
             with context.begin_transaction():
