@@ -8,11 +8,13 @@ from app import models  # noqa: F401
 from app.core.config import settings
 from app.db import Base
 
-logger = logging.getLogger("vexion.migrations")
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Preserve Uvicorn/FastAPI and application loggers. The default
+    # disable_existing_loggers=True hid startup exceptions in production.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
+logger = logging.getLogger("vexion.migrations")
 target_metadata = Base.metadata
 
 # Every API instance runs Alembic during startup. Serialize migrations at the
