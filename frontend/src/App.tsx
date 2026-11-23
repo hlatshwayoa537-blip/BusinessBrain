@@ -946,7 +946,7 @@ function BillingWorkspace({session}:{session:AuthData}) {
         <article><span>Estimated monthly total</span><strong>{money(data.estimated_monthly_total)}</strong><small>Based on active registered POS</small></article>
         <article><span>Verified referrals</span><strong>{data.verified_direct_referrals} / 5</strong><small>{data.referral_discount_eligible?"Referral price unlocked":"Five paying referrals required"}</small></article>
       </div>
-      <div className="billing-price-note"><strong>Pricing rules</strong><span>R499 per active POS terminal each month. After five directly referred businesses have verified paid subscriptions, your rate becomes R399 per active POS terminal each month. The lower rate is applied to future recurring charges after PayFast confirms the update.</span></div>
+      <div className="billing-price-note"><strong>Pricing rules</strong><span>R500 per active POS terminal each month. After five directly referred businesses have verified paid subscriptions, your rate becomes R399 per active POS terminal each month. The lower rate is applied to future recurring charges after PayFast confirms the update.</span></div>
       <div className="billing-actions">
         {data.payment_status==="paid"&&data.subscription_update_available&&<button type="button" className="network-primary-button" onClick={()=>void syncRecurringPrice()} disabled={priceSyncBusy}>{priceSyncBusy?"Updating PayFast…":"Apply current price to next recurring charge"}</button>}
         {data.payment_status==="paid"&&data.cancel_available&&<button type="button" className="billing-cancel-button" onClick={()=>void cancelSubscription()} disabled={cancelBusy}>{cancelBusy?"Cancelling…":"Cancel subscription"}</button>}
@@ -1018,13 +1018,13 @@ function ReferralWorkspace({session}:{session:AuthData}) {
         <article><span>Businesses registered</span><strong>{data.registered_referrals}</strong><small>Direct referrals attributed to you</small></article>
         <article><span>Payments verified</span><strong>{data.payment_verified_referrals}</strong><small>Required to unlock the reward</small></article>
         <article><span>Still needed</span><strong>{data.remaining_to_qualify}</strong><small>Five paying businesses qualify</small></article>
-        <article><span>Your POS price</span><strong>R {data.discount_eligible?399:499}</strong><small>Per active POS terminal / month</small></article>
+        <article><span>Your POS price</span><strong>R {data.discount_eligible?399:500}</strong><small>Per active POS terminal / month</small></article>
       </div>
       <div className="finance-form">
         <h3>Your referral code</h3>
         <div className="finance-outstanding"><strong>{data.referral_code}</strong><button type="button" className="network-primary-button" onClick={()=>void copyLink()}>{copied?"Copied":"Copy referral link"}</button></div>
         <label>Share this link<input readOnly value={referralLink}/></label>
-        <p className="finance-disclaimer">Reward rule: refer five separate businesses that become paying VEXION customers. Once verified, your subscription price becomes R399 per POS terminal per month instead of R499. This is a single-level programme; there are no downline commissions.</p>
+        <p className="finance-disclaimer">Reward rule: refer five separate businesses that become paying VEXION customers. Once verified, your subscription price becomes R399 per POS terminal per month instead of R500. This is a single-level programme; there are no downline commissions.</p>
         <p className="finance-alert">{data.reward_terms.note}</p>
       </div>
       <div className="finance-report"><div className="recruitment-card-heading"><div><span className="eyebrow">YOUR REFERRALS</span><h3>Businesses you've introduced</h3></div><span className="module-count">{data.referrals.length} TOTAL</span></div>
