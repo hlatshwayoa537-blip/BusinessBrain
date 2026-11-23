@@ -27,8 +27,8 @@ def test_billing_starts_inactive_and_prices_each_registered_pos_terminal(client)
     overview = client.get("/api/v1/billing/me", headers=headers)
     body = overview.json()
     assert body["active_pos_terminals"] == 3
-    assert body["unit_price_per_pos_month"] == "499.00"
-    assert body["estimated_monthly_total"] == "1497.00"
+    assert body["unit_price_per_pos_month"] == "500.00"
+    assert body["estimated_monthly_total"] == "1500.00"
     assert body["subscription_status"] == "not_started"
     assert body["payment_status"] == "not_configured"
     assert "no payment has been collected" in body["notice"]
@@ -109,7 +109,7 @@ def test_billing_discovers_pos_terminals_from_ingested_till_transactions(client)
     assert overview.status_code == 200
     body = overview.json()
     assert body["active_pos_terminals"] == 3
-    assert body["estimated_monthly_total"] == "1497.00"
+    assert body["estimated_monthly_total"] == "1500.00"
     assert len(body["terminals"]) == 3
     assert all(row["source"] == "connected_pos_feed" for row in body["terminals"])
     assert {row["display_name"] for row in body["terminals"]} == {"Till 01", "Till 02"}
@@ -189,7 +189,7 @@ def test_payfast_checkout_creates_pending_payment_without_activating_subscriptio
     response = client.post("/api/v1/billing/payfast/checkout", headers=headers)
     assert response.status_code == 200
     body = response.json()
-    assert body["amount"] == "499.00"
+    assert body["amount"] == "500.00"
     assert body["status"] == "pending_verification"
     assert body["checkout_url"] == "https://sandbox.payfast.co.za/eng/process"
     assert body["fields"]["notify_url"].endswith("/api/v1/billing/payfast/itn")
@@ -258,9 +258,9 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
         "pf_payment_id": "1089250",
         "payment_status": "COMPLETE",
         "item_name": "VEXION monthly subscription",
-        "amount_gross": "499.00",
+        "amount_gross": "500.00",
         "amount_fee": "0.00",
-        "amount_net": "499.00",
+        "amount_net": "500.00",
         "currency": "ZAR",
         "token": "dc0521d3-55fe-269b-fa00-b647310d760f",
     }
@@ -286,12 +286,12 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     update_calls = []
     def fake_recurring_update(**kwargs):
         update_calls.append(kwargs)
-        return 49900
+        return 50000
     monkeypatch.setattr(billing_routes, "update_recurring_subscription_amount", fake_recurring_update)
     price_update = client.post("/api/v1/billing/payfast/update-amount", headers=headers)
     assert price_update.status_code == 200
     assert price_update.json()["status"] == "already_synced"
-    assert price_update.json()["recurring_amount"] == "499.00"
+    assert price_update.json()["recurring_amount"] == "500.00"
     assert price_update.json()["effective_for"] == "future recurring charges"
     assert update_calls == []
 
@@ -307,7 +307,7 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     # identifies the active recurring subscription.
     recurring_fields = {key: value for key, value in fields.items() if key != "m_payment_id"}
     recurring_fields["pf_payment_id"] = "1089251"
-    recurring_fields["amount_gross"] = "498.99"
+    recurring_fields["amount_gross"] = "499.99"
     recurring_signature = generate_signature(recurring_fields, "test-pass", recurring_fields.keys())
     recurring_payload = urlencode({**recurring_fields, "signature": recurring_signature})
     wrong_amount = client.post(
@@ -318,7 +318,7 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
     assert wrong_amount.status_code == 400
 
     recurring_fields["pf_payment_id"] = "1089252"
-    recurring_fields["amount_gross"] = "499.00"
+    recurring_fields["amount_gross"] = "500.00"
     recurring_signature = generate_signature(recurring_fields, "test-pass", recurring_fields.keys())
     recurring_payload = urlencode({**recurring_fields, "signature": recurring_signature})
     recurring = client.post(
@@ -383,7 +383,7 @@ def test_verified_payfast_itn_activates_subscription_once(client, monkeypatch):
         "pf_payment_id": "1089255",
         "payment_status": "COMPLETE",
         "item_name": "VEXION monthly subscription",
-        "amount_gross": "499.00",
+        "amount_gross": "500.00",
         "currency": "ZAR",
         "token": new_token,
     }
@@ -502,7 +502,7 @@ def test_payfast_itn_requires_recurring_subscription_token(client, monkeypatch):
         "pf_payment_id": "1089260",
         "payment_status": "COMPLETE",
         "item_name": "VEXION monthly subscription",
-        "amount_gross": "499.00",
+        "amount_gross": "500.00",
     }
     signature = generate_signature(fields, "test-pass", fields.keys())
     payload = urlencode({**fields, "signature": signature})
@@ -568,7 +568,7 @@ def test_billing_overview_preserves_provider_synced_recurring_amount(client, mon
         "pf_payment_id": "1090001",
         "payment_status": "COMPLETE",
         "item_name": "VEXION monthly subscription",
-        "amount_gross": "499.00",
+        "amount_gross": "500.00",
         "currency": "ZAR",
         "token": token,
     }
@@ -586,18 +586,18 @@ def test_billing_overview_preserves_provider_synced_recurring_amount(client, mon
     })
     overview = client.get("/api/v1/billing/me", headers=headers).json()
     assert overview["active_pos_terminals"] == 2
-    assert overview["estimated_monthly_total"] == "998.00"
+    assert overview["estimated_monthly_total"] == "1000.00"
     assert overview["subscription_price_out_of_sync"] is True
     assert overview["subscription_update_available"] is True
 
     # The overview must not rewrite the last provider-confirmed amount. PayFast
-    # can legitimately charge the old R499 amount until its update is confirmed.
+    # can legitimately charge the previously confirmed R500 amount until its update is confirmed.
     recurring_fields = {
         "merchant_id": "10000100",
         "pf_payment_id": "1090002",
         "payment_status": "COMPLETE",
         "item_name": "VEXION monthly subscription",
-        "amount_gross": "499.00",
+        "amount_gross": "500.00",
         "currency": "ZAR",
         "token": token,
     }
@@ -611,14 +611,14 @@ def test_billing_overview_preserves_provider_synced_recurring_amount(client, mon
     assert recurring.status_code == 200
     assert recurring.json()["recurring"] is True
 
-    monkeypatch.setattr(billing_routes, "update_recurring_subscription_amount", lambda **_kwargs: 99800)
+    monkeypatch.setattr(billing_routes, "update_recurring_subscription_amount", lambda **_kwargs: 100000)
     updated = client.post("/api/v1/billing/payfast/update-amount", headers=headers)
     assert updated.status_code == 200
     after_update = client.get("/api/v1/billing/me", headers=headers).json()
     assert after_update["subscription_price_out_of_sync"] is False
     assert after_update["subscription_update_available"] is False
 
-    new_recurring_fields = {**recurring_fields, "pf_payment_id": "1090003", "amount_gross": "998.00"}
+    new_recurring_fields = {**recurring_fields, "pf_payment_id": "1090003", "amount_gross": "1000.00"}
     signature = generate_signature(new_recurring_fields, "test-pass", new_recurring_fields.keys())
     new_recurring_payload = urlencode({**new_recurring_fields, "signature": signature})
     new_recurring = client.post(
@@ -658,7 +658,7 @@ def test_owner_can_cancel_payfast_subscription_only_after_provider_confirmation(
         "pf_payment_id": "1090101",
         "payment_status": "COMPLETE",
         "item_name": "VEXION monthly subscription",
-        "amount_gross": "499.00",
+        "amount_gross": "500.00",
         "currency": "ZAR",
         "token": token,
     }
