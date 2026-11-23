@@ -21,7 +21,7 @@ from app.core.config import settings
 from app.services.payfast import build_subscription_checkout, cancel_recurring_subscription, update_recurring_subscription_amount, verify_itn_signature
 
 router = APIRouter(prefix="/billing", tags=["billing"])
-STANDARD_PRICE = Decimal("499.00")
+STANDARD_PRICE = Decimal("500.00")
 REFERRAL_PRICE = Decimal("399.00")
 
 
