@@ -26,12 +26,13 @@ def test_pos_connection_secret_is_returned_once_and_never_listed(client):
     assert "secret_hash" not in listed.json()[0]
 
 def test_pos_ingestion_is_authenticated_idempotent_and_summarized(client):
+    from datetime import datetime, timezone
     headers = auth_headers(client)
     connection = create_pos_connection(client, headers).json()
     payload = {
         "external_transaction_id": "TILL-0001", "branch_name": "Durban",
         "till_name": "Till 1", "transaction_type": "sale",
-        "occurred_at": "2026-11-17T10:00:00+02:00", "currency": "ZAR",
+        "occurred_at": datetime.now(timezone.utc).isoformat(), "currency": "ZAR",
         "gross_amount": "115.00", "discount_amount": "0.00",
         "tax_amount": "15.00", "net_amount": "115.00", "payment_method": "card"
     }
