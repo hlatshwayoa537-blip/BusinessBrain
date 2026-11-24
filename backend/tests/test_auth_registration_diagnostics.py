@@ -61,3 +61,44 @@ def test_untrusted_origin_cannot_preflight_registration(client):
 
     assert response.status_code == 400
     assert "access-control-allow-origin" not in response.headers
+
+
+def test_registration_validation_never_echoes_password(client):
+    payload = registration_payload(f"short-password-{uuid4().hex}@example.com")
+    payload["password"] = "too-short"
+
+    response = client.post("/api/v1/auth/register", json=payload)
+
+    assert response.status_code == 422
+    body = response.json()
+    assert "detail" in body
+    assert "input" not in str(body).lower()
+    assert "too-short" not in str(body)
+
+
+def test_registration_login_and_authenticated_workspace_round_trip(client):
+    email = f"auth-round-trip-{uuid4().hex}@example.com"
+    payload = registration_payload(email)
+
+    registered = client.post("/api/v1/auth/register", json=payload)
+    assert registered.status_code == 201
+    access_token = registered.json()["access_token"]
+    assert access_token
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+    me = client.get("/api/v1/auth/me", headers=headers)
+    assert me.status_code == 200
+    assert me.json()["email"] == email
+
+    workspaces = client.get("/api/v1/auth/businesses", headers=headers)
+    assert workspaces.status_code == 200
+    assert len(workspaces.json()) == 1
+    assert workspaces.json()[0]["name"] == "Registration Test Business"
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"identifier": email, "password": payload["password"]},
+    )
+    assert login.status_code == 200
+    assert login.json()["user"]["email"] == email
+    assert login.json()["business"]["name"] == "Registration Test Business"
