@@ -4,8 +4,10 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from app.api.routes.auth import router as auth_router
 from app.api.routes.activity import router as activity_router
 from app.api.routes.health import router as health_router
@@ -69,6 +71,28 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Accept", "Authorization", "Content-Type", "X-Vexion-Secret"],
 )
+
+@app.exception_handler(RequestValidationError)
+async def handle_request_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    # Do not log or echo rejected input values: registration payloads contain passwords.
+    safe_errors = [
+        {
+            "loc": list(error.get("loc", ())),
+            "msg": error.get("msg", "Invalid value"),
+            "type": error.get("type", "value_error"),
+        }
+        for error in exc.errors()
+    ]
+    fields = [ ".".join(str(part) for part in error["loc"]) for error in safe_errors ]
+    logger.warning(
+        "Request validation failed method=%s path=%s fields=%s",
+        request.method,
+        request.url.path,
+        fields,
+    )
+    return JSONResponse(status_code=422, content={"detail": safe_errors})
+
+
 app.include_router(health_router, prefix=settings.api_v1_prefix)
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
 app.include_router(activity_router, prefix=settings.api_v1_prefix)
