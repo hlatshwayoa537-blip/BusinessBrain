@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     app_env: str = "development"
     api_v1_prefix: str = "/api/v1"
     frontend_origins: str = "http://localhost:5173"
+    # Exact Base44 preview origin; keep this explicit (never use a wildcard).
+    base44_preview_origin: str = "https://preview--vexion-next-core.base44.app"
     database_url: str = "postgresql+psycopg://businessbrain:businessbrain@localhost:5432/businessbrain"
     jwt_secret_key: str = "development-only-change-me"
     access_token_expire_minutes: int = 30
@@ -53,7 +55,11 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins(self) -> list[str]:
-        return [origin.strip() for origin in self.frontend_origins.split(",") if origin.strip()]
+        configured = [origin.strip().rstrip("/") for origin in self.frontend_origins.split(",") if origin.strip()]
+        preview = self.base44_preview_origin.strip().rstrip("/")
+        if preview and preview not in configured:
+            configured.append(preview)
+        return configured
 
     @property
     def public_frontend_base_url(self) -> str:
